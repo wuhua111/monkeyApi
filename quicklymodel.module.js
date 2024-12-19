@@ -5,8 +5,7 @@
 //     // ... 其他选项
 // });
 // ==模块定义==
-const createQuicklyModel = (function () {
-    return function (options = {}) {
+function QuicklyModel(options = {}) {
     // API命名空间
     const config = {
         debug: false,
@@ -24,14 +23,14 @@ const createQuicklyModel = (function () {
             iframe: {}, // iframe操作相关
             createElement: {}, // createElement增强
             waitElement: {}, // waitElement实现
-        },      
+        },
         event: {
             urlChange: {}, // URL变化监听
             domContentLoaded: {}, // DOM加载完成事件
             addEventListener: {}, // 事件监听器增强
             getDbclickAPI: {}, // 元素双击
             message: {}, // 消息
-        },    
+        },
         net: {
             xhr: {}, // XMLHttpRequest增强
             fetch: {}, // fetch增强
@@ -45,7 +44,7 @@ const createQuicklyModel = (function () {
             background: {}, // 背景动画
             color: {}, // 颜色动画
             scan: {} // 扫描动画
-        },  
+        },
         data: {}      // 数据处理
     };
 
@@ -297,7 +296,7 @@ const createQuicklyModel = (function () {
                     };
                 };
             },
-            security:{
+            security: {
                 setSecurePolicy: function () {
                     if (!unsafeWindow.isSecureContext || !unsafeWindow.trustedTypes?.createPolicy || unsafeWindow.trustedTypes?.defaultPolicy) return;
                     unsafeWindow.trustedTypes.createPolicy("default", {
@@ -327,7 +326,7 @@ const createQuicklyModel = (function () {
                     };
                 })()
             },
-            type:{
+            type: {
                 isClassInstance: function (obj) {
                     return obj !== null
                         && typeof obj === 'object'
@@ -424,7 +423,7 @@ const createQuicklyModel = (function () {
                         api.apiLog.error(`${lastProp} have been modified`);
                     }
                     if (typeof value !== 'function' && !api.utils.type.isClassInstance(value)) {
-                        const descriptor = value
+                        const descriptor = value;
                         api.utils.defineProperty(dec, lastProp, descriptor);
                     } else {
                         dec[lastProp] = value;
@@ -442,7 +441,7 @@ const createQuicklyModel = (function () {
                     }
                 }
             },
-            
+
         };
         // 创建API工厂
         api.factory = api.utils.createApiFactory();
@@ -502,7 +501,7 @@ const createQuicklyModel = (function () {
                 });
                 monitor.observe(observeNode, observeOptions);
             });
-        }
+        };
 
         // iframe处理
         api.dom.iframe = {
@@ -1058,7 +1057,7 @@ const createQuicklyModel = (function () {
                     close: closeAnimation
                 };
             }
-        }
+        };
     }
 
     // ==数据处理模块==
@@ -1886,16 +1885,19 @@ const createQuicklyModel = (function () {
         }
         api.data.dataProcess = new DATA_PROCESS();
     }
-    
-    
+
+
     // 初始化所有API
     utilsApiInit();
-    domApiInit()
-    eventApiInit()
-    dataApiInit()
-    netApiInit()
-    animateApiInit()
+    domApiInit();
+    eventApiInit();
+    dataApiInit();
+    netApiInit();
+    animateApiInit();
     // 返回API对象
     return api;
-}
+};
+
+(function () {
+    return QuicklyModel;
 })();
