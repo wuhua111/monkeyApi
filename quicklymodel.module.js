@@ -1,6 +1,17 @@
+// 使用: const createModule = new Function('return ' + factoryCode)();
+// const api = createQuicklyModel({
+//     // 配置选项
+//     debug: true,
+//     // ... 其他选项
+// });
 // ==模块定义==
-const QuicklyModel = (function () {
+const createQuicklyModel = (function () {
+    return function (options = {}) {
     // API命名空间
+    const config = {
+        debug: false,
+    };
+    Object.assign(config, options);
     const api = {
         version: '1.0.0',
         factory: null,
@@ -1875,7 +1886,8 @@ const QuicklyModel = (function () {
         }
         api.data.dataProcess = new DATA_PROCESS();
     }
-
+    
+    
     // 初始化所有API
     utilsApiInit();
     domApiInit()
@@ -1885,13 +1897,5 @@ const QuicklyModel = (function () {
     animateApiInit()
     // 返回API对象
     return api;
+}
 })();
-
-// ==模块导出==
-if (typeof module !== 'undefined' && module.exports) {
-    module.exports = QuicklyModel;
-} else if (typeof define === 'function' && define.amd) {
-    define(function () { return QuicklyModel; });
-} else {
-    window.QuicklyModel = QuicklyModel;
-} 
