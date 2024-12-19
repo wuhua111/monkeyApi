@@ -1,44 +1,52 @@
-// ==UserScript==
-// @name         quicklymodel
-// @namespace    http://tampermonkey.net/
-// @version      1
-// @author       hua
-// @match        *
-// @grant        unsafeWindow
-// @grant        GM_xmlhttpRequest
-// @grant        GM_setValue
-// @grant        GM_getValue
-// @grant        GM_info
-// @grant        GM_setClipboard
-// @run-at       document-start
-// @license      MIT
-// ==/UserScript==
+// ==模块定义==
+const QuicklyModel = (function () {
+    // API命名空间
+    const api = {
+        version: '1.0.0',
+        factory: null,
+        apiLog: null,
+        dom: {
+            query: { // DOM查询相关
+                $: null,
+                $$: null
+            },
+            iframe: {}, // iframe操作相关
+            createElement: {}, // createElement增强
+            waitElement: {}, // waitElement实现
+        },      
+        event: {
+            urlChange: {}, // URL变化监听
+            domContentLoaded: {}, // DOM加载完成事件
+            addEventListener: {}, // 事件监听器增强
+            getDbclickAPI: {}, // 元素双击
+            message: {}, // 消息
+        },    
+        net: {
+            xhr: {}, // XMLHttpRequest增强
+            fetch: {}, // fetch增强
+            dyncFileLoad: {}, // 动态文件加载
+        },      // 网络请求相关
+        utils: {
+            security: {},
+            type: {}
+        },
+        animate: {
+            background: {}, // 背景动画
+            color: {}, // 颜色动画
+            scan: {} // 扫描动画
+        },  
+        data: {}      // 数据处理
+    };
 
-const api = {
-    version: '1.0.0',
-};
-const $ = unsafeWindow.document.querySelector.bind(unsafeWindow.document);
-const $$ = unsafeWindow.document.querySelectorAll.bind(unsafeWindow.document);
-let href = unsafeWindow.location.href;
-easyApiInit();
-
-function easyApiInit() {
-    utilsApiInit();
-    dataProcessInit();
-    initOtherApi();
-    initNetapi();
-
+    // ==工具函数模块==
     function utilsApiInit() {
         const api_ = api;
         api.utils = {
             createApiFactory: function () {
                 const api = {
-                    // key string value Map <key, [callback, options]>
-                    // optoons { once: true , async: true , failCallback: function () {}  , successCallback: function () {} ,stopPropagation : false ,weight: 1 ,args: []}
                     subscribeMap: new Map(),
                     globalOptionsMap: new Map(),
                     setGolbalOptions: function (name, options) {
-                        // globaloptions  subscribeCallback unsubscribeCallback wrapCallback
                         if (![undefined, null].includes(options?.modify)) {
                             options.modify = Array.isArray(options.modify) ? options.modify : [options.modify];
                         }
@@ -54,11 +62,11 @@ function easyApiInit() {
                         const defaultOptions = {
                             once: false,
                             async: false,
-                            stopPropagation: false, // 当回调函数为非异步，并且返回结果为 true 时，是否阻止继续执行下面的回调函数
-                            weight: 1,  // 权重 越高执行顺序越前
-                            extras: {}, // 额外传给回调函数的参数
-                            failCallback: null, // 回调执行返回false或者报错时，执行的回调
-                            successCallback: null, // 回调执行返回true时，执行的回调
+                            stopPropagation: false,
+                            weight: 1,
+                            extras: {},
+                            failCallback: null,
+                            successCallback: null,
                             maxCalls: Infinity,
                             debounceTime: 0,
                             uniqueId: null,
@@ -106,7 +114,6 @@ function easyApiInit() {
                                         api_.apiLog.error(`${name} global callback error`, error);
                                     }
                                     return originCallback.call(this, ...args);
-
                                 };
                             };
                         }
@@ -118,7 +125,6 @@ function easyApiInit() {
                             const now = Date.now();
                             if (callCount >= options.maxCalls) return;
                             if (options.throttleTime > 0 && now - lastCallTime < options.throttleTime) return;
-                            // Clear existing timeout for debounce
                             if (debounceTimeoutId) clearTimeout(debounceTimeoutId);
                             const executeCallback = () => {
                                 callCount++;
@@ -138,7 +144,6 @@ function easyApiInit() {
                                             }
                                         }
                                     }
-
                                 } catch (error) {
                                     options.failCallback?.(...data);
                                     api_.apiLog.error('callback error', error);
@@ -173,7 +178,6 @@ function easyApiInit() {
                                         api_.apiLog.error(`${name} uniqueMode must be "replace" or "none"`);
                                         return;
                                     }
-
                                 }
                             }
                         }
@@ -282,177 +286,50 @@ function easyApiInit() {
                     };
                 };
             },
-            setSecurePolicy: function () {
-                if (!unsafeWindow.isSecureContext || !unsafeWindow.trustedTypes?.createPolicy || unsafeWindow.trustedTypes?.defaultPolicy) return;
-                unsafeWindow.trustedTypes.createPolicy("default", {
-                    createScriptURL: (url) => url,
-                    createHTML: (html) => html,
-                    createScript: (script) => script
-                });
-            },
-            animate: {
-                backgroundFlash: function (decNode, options = {}) {
-                    const {
-                        frequency = 100,
-                        isFront = false,
-                        timeout = 0
-                    } = options;
-                    let background_color_interval_id;
-                    let originTransition;
-                    let originColor;
-                    const decProName = isFront ? 'color' : 'backgroundColor';
-                    const startAnimation = () => {
-                        if (timeout > 0) {
-                            setTimeout(() => {
-                                closeAnimation();
-                            }, timeout);
+            security:{
+                setSecurePolicy: function () {
+                    if (!unsafeWindow.isSecureContext || !unsafeWindow.trustedTypes?.createPolicy || unsafeWindow.trustedTypes?.defaultPolicy) return;
+                    unsafeWindow.trustedTypes.createPolicy("default", {
+                        createScriptURL: (url) => url,
+                        createHTML: (html) => html,
+                        createScript: (script) => script
+                    });
+                },
+                trustedScript: (() => {
+                    try {
+                        let test_value;
+                        eval('test_eval = 1');
+                        return function (str) {
+                            return str;
+                        };
+                    } catch (error) {
+                        if (unsafeWindow.trustedTypes) {
+                            const policy = unsafeWindow.trustedTypes.createPolicy('eval', {
+                                createScript: (script) => script
+                            });
+                            return function (str) {
+                                return policy.createScript(str);
+                            };
+                        } else {
+                            api.apiLog.error('trustedTypes not support', error);
                         }
-                        originTransition = decNode.style.transition;
-                        originColor = decNode.style[decProName];
-                        decNode.style.transition = `${decNode.style.transition && (decNode.style.transition + " , ")}background-color 0.5s ease`;
-                        let lastTime = 0;
-                        const interval = frequency;
-                        const animate = (timestamp) => {
-                            if (timestamp - lastTime >= interval) {
-                                decNode.style[decProName] = api.utils.randomColor();
-                                lastTime = timestamp;
-                            }
-                            background_color_interval_id = requestAnimationFrame(animate);
-                        };
-                        background_color_interval_id = requestAnimationFrame(animate);
                     };
-
-                    const closeAnimation = () => {
-                        if (!background_color_interval_id) return;
-                        cancelAnimationFrame(background_color_interval_id);
-                        decNode.style[decProName] = originColor;
-                        decNode.style.transition = originTransition;
-                    };
-                    return {
-                        start: startAnimation,
-                        close: closeAnimation
-                    };
-                },
-                changeColor: function (decNode, options = {}) {
-                    const {
-                        color = 'yellow',
-                        isFront = false,
-                        timeout = 0
-                    } = options;
-                    let decProName = isFront ? 'color' : 'backgroundColor';
-                    let originColor = decNode.style[decProName];
-                    decNode.style[decProName] = color;
-                    if (timeout > 0) setTimeout(() => {
-                        decNode.style[decProName] = originColor;
-                    }, timeout);
-                    return () => {
-                        decNode.style[decProName] = originColor;
-                    };
-                },
-                headerScan: function (decNode, color = 'yellow') {
-                    let scanLine;
-                    let styleElement;
-                    const startAnimation = () => {
-                        styleElement = document.createElement('style');
-                        styleElement.innerHTML = `
-                                                @keyframes scan {
-                                                0%, 100% { top: 0; }
-                                                50% { top: calc(100% - 2px); }
-                                                }
-                                                 .avatar-container {
-                                                    position: relative;
-                                                    overflow: hidden;
-                                                }
-                                                .scan-line {
-                                                position: absolute;
-                                                top: 0;
-                                                left: 0;
-                                                width: 100%;
-                                                height: 2px;
-                                                background-color: ${color};
-                                                animation: scan 0.5s linear infinite;
-                                                }
-                                            `;
-                        unsafeWindow.document.head.appendChild(styleElement);
-                        scanLine = unsafeWindow.document.createElement('div');
-                        scanLine.className = 'scan-line';
-                        decNode.appendChild(scanLine);
-                        decNode.classList.add('avatar-container');
-                    };
-                    const closeAnimation = () => {
-                        scanLine.remove();
-                        styleElement.remove();
-                        decNode.classList.remove('avatar-container');
-                    };
-                    return {
-                        start: startAnimation,
-                        close: closeAnimation
-                    };
-                }
+                })()
             },
-            getDbclickAPI: function (node, handler, timeout = 300) {
-                if (node.inject_dbclick) return;
-                node.inject_dbclick = true;
-
-                let isClick = false;
-                let timers = new Set(); // 使用 Set 来管理定时器
-                const originOnclick = node.onclick;
-
-                // 清理所有定时器的函数
-                const clearAllTimers = () => {
-                    timers.forEach(timer => clearTimeout(timer));
-                    timers.clear();
-                };
-
-                const fakeOnclick = (e) => {
-                    if (isClick) {
-                        isClick = false;
-                        originOnclick?.call(node, e);
-                        return;
+            type:{
+                isClassInstance: function (obj) {
+                    return obj !== null
+                        && typeof obj === 'object'
+                        && obj.constructor !== Object;
+                },
+                isNative: function (name, fun) {
+                    const fun_str = fun.toString();
+                    if (!api.utils.ua.includes('Firefox')) {
+                        return `function ${name}() { [native code] }` === fun_str;
+                    } else {
+                        return `function ${name}() {\n    [native code]\n}` === fun_str;
                     }
-
-                    e.preventDefault();
-                    e.stopPropagation();
-                    e.stopImmediatePropagation();
-
-                    const timer = setTimeout(() => {
-                        isClick = true;
-                        clearAllTimers();
-                        node.click();
-                    }, timeout);
-
-                    timers.add(timer);
-                };
-
-                const dblclickHandler = (e) => {
-                    e.preventDefault();
-                    clearAllTimers();
-                    handler.call(node, e); // 保持 this 上下文
-                };
-
-                return {
-                    set: () => {
-                        node.onclick = null;
-                        // 使用 options 对象统一配置
-                        const eventOptions = {
-                            capture: true,
-                            passive: false // 明确声明不是被动事件
-                        };
-
-                        node.addEventListener('click', fakeOnclick, eventOptions);
-                        node.addEventListener('dblclick', dblclickHandler, eventOptions);
-                    },
-                    unset: () => {
-                        clearAllTimers(); // 清理遗留的定时器
-                        node.onclick = originOnclick;
-
-                        const eventOptions = { capture: true };
-                        node.removeEventListener('click', fakeOnclick, eventOptions);
-                        node.removeEventListener('dblclick', dblclickHandler, eventOptions);
-
-                        delete node.inject_dbclick; // 清理标记
-                    }
-                };
+                },
             },
             randomColor: function () {
                 var letters = '0123456789ABCDEF';
@@ -469,19 +346,6 @@ function easyApiInit() {
                     return;
                 }
                 Object.defineProperty(obj, property, descriptor);
-            },
-            check_native: function (name, fun) {
-                const fun_str = fun.toString();
-                if (!api.utils.ua.includes('Firefox')) {
-                    return `function ${name}() { [native code] }` === fun_str;
-                } else {
-                    return `function ${name}() {\n    [native code]\n}` === fun_str;
-                }
-            },
-            isClassInstance: function (obj) {
-                return obj !== null
-                    && typeof obj === 'object'
-                    && obj.constructor !== Object;
             },
             ua: unsafeWindow.navigator.userAgent,
             console: unsafeWindow.console,
@@ -501,11 +365,10 @@ function easyApiInit() {
                     const prefix = `%c${this.PREFIX}[${timestamp}][${level}]`;
                     const style = `color: ${this.LEVELS[level].color}; font-weight: bold;`;
 
-                    api.utils.console.log(prefix, style, ...args);
+                    api.apiLog.log(prefix, style, ...args);
 
-                    // 如果是错误，还可以记录堆栈
                     if (level === 'ERROR') {
-                        api.utils.console.trace();
+                        api.apiLog.trace();
                     }
                 },
 
@@ -525,7 +388,6 @@ function easyApiInit() {
                     this._log('ERROR', ...args);
                 },
 
-                // 用于记录特定模块的日志
                 scope(moduleName) {
                     return {
                         debug: (...args) => this._log('DEBUG', `[${moduleName}]`, ...args),
@@ -547,15 +409,13 @@ function easyApiInit() {
                         });
                     }
                     const originFun = dec[lastProp];
-                    if (!api.utils.check_native(lastProp, originFun)) {
+                    if (!api.utils.type.isNative(lastProp, originFun)) {
                         api.apiLog.error(`${lastProp} have been modified`);
                     }
-                    if (typeof value !== 'function' && !api.utils.isClassInstance(value)) {
-                        // 如果 value 不是函数，则将 value 设置为 descriptor
-                        const descriptor = value;
+                    if (typeof value !== 'function' && !api.utils.type.isClassInstance(value)) {
+                        const descriptor = value
                         api.utils.defineProperty(dec, lastProp, descriptor);
                     } else {
-                        // 设置 函数 和 类实例
                         dec[lastProp] = value;
                         value.toString = originFun.toString.bind(originFun);
                     }
@@ -571,98 +431,94 @@ function easyApiInit() {
                     }
                 }
             },
-            trustedScript: (() => {
-                try {
-                    let test_value;
-                    eval('test_eval = 1');
-                    return function (str) {
-                        return str;
-                    };
-                } catch (error) {
-                    if (unsafeWindow.trustedTypes) {
-                        const policy = unsafeWindow.trustedTypes.createPolicy('eval', {
-                            createScript: (script) => script
-                        });
-                        return function (str) {
-                            return policy.createScript(str);
-                        };
-                    } else {
-                        api.apiLog.error('trustedTypes not support', error);
-                    }
-                };
-            })(),
-            waitElement: function (observeNode, condition, options = {}) {
-                return new Promise((resolve, reject) => {
-                    const startTime = Date.now();
-                    const { timeout = 10000, type = 'add', observeOptions = { childList: true, subtree: true } } = options;
-                    const monitor = new MutationObserver(function (mutationsList) {
-                        if (Date.now() - startTime > timeout) {
-                            monitor.disconnect();
-                            reject('timeout');
-                            return;
-                        }
-                        if (type === 'none') {
-                            if (condition(mutationsList)) {
-                                monitor.disconnect();
-                                resolve();
-                            }
-                            return;
-                        }
-                        for (let mutation of mutationsList) {
-                            if (mutation.type === 'childList' && mutation.addedNodes.length > 0) {
-                                if (type === 'add') {
-                                    decNodes = mutation.addedNodes;
-                                } else if (type === 'remove') {
-                                    decNodes = mutation.removedNodes;
-                                }
-                                for (let child of decNodes) {
-                                    if (!condition(child)) continue;
-                                    monitor.disconnect();
-                                    resolve(child);
-                                    return;
-                                }
-                            }
-                        }
-                    });
-                    monitor.observe(observeNode, observeOptions);
-                });
-            },
+            
         };
+        // 创建API工厂
         api.factory = api.utils.createApiFactory();
+        // 创建日志记录器
         api.apiLog = api.utils.Logger.scope('API');
     }
 
-    function initOtherApi() {
-        api.createElement = api.factory('createElement');
+    // ==DOM操作模块==
+    function domApiInit() {
+        // 基础DOM查询
+        api.dom.query.$ = unsafeWindow.document.querySelector.bind(unsafeWindow.document);
+        api.dom.query.$$ = unsafeWindow.document.querySelectorAll.bind(unsafeWindow.document);
+
+        // createElement增强
+        api.dom.createElement = api.factory('createElement');
         const origin_createElement = unsafeWindow.document.createElement;
         function fakeCreateElement(tag, options) {
             let node = origin_createElement.call(this, tag, options);
-            api.createElement.trigger(this, node, tag, options);
+            api.dom.createElement.trigger(this, node, tag, options);
             return node;
-        };
+        }
         api.utils.origin.hook('document.createElement', fakeCreateElement);
 
-        api.iframe = {
+        // waitElement实现
+        api.dom.waitElement = function (observeNode, condition, options = {}) {
+            return new Promise((resolve, reject) => {
+                const startTime = Date.now();
+                const { timeout = 10000, type = 'add', observeOptions = { childList: true, subtree: true } } = options;
+                const monitor = new MutationObserver(function (mutationsList) {
+                    if (Date.now() - startTime > timeout) {
+                        monitor.disconnect();
+                        reject('timeout');
+                        return;
+                    }
+                    if (type === 'none') {
+                        if (condition(mutationsList)) {
+                            monitor.disconnect();
+                            resolve();
+                        }
+                        return;
+                    }
+                    for (let mutation of mutationsList) {
+                        if (mutation.type === 'childList' && mutation.addedNodes.length > 0) {
+                            if (type === 'add') {
+                                decNodes = mutation.addedNodes;
+                            } else if (type === 'remove') {
+                                decNodes = mutation.removedNodes;
+                            }
+                            for (let child of decNodes) {
+                                if (!condition(child)) continue;
+                                monitor.disconnect();
+                                resolve(child);
+                                return;
+                            }
+                        }
+                    }
+                });
+                monitor.observe(observeNode, observeOptions);
+            });
+        }
+
+        // iframe处理
+        api.dom.iframe = {
             oncreate: api.factory('frameOncreate'),
             contentWindow: api.factory('frameOnget'),
         };
-        api.createElement.subscribe((node) => {
-            api.iframe.oncreate.trigger(node);
+        api.dom.createElement.subscribe((node) => {
+            api.dom.iframe.oncreate.trigger(node);
             const contentWindow_getter = Object.getOwnPropertyDescriptor(HTMLIFrameElement.prototype, "contentWindow").get;
             api.utils.defineProperty(node, 'contentWindow', {
                 get: function () {
                     const contentWindow = contentWindow_getter.call(node);
                     delete node.contentWindow;
                     if (!contentWindow || this.src !== 'about:blank') return contentWindow;
-                    api.iframe.contentWindow.trigger(this, contentWindow, node);
+                    api.dom.iframe.contentWindow.trigger(this, contentWindow, node);
                     return contentWindow;
                 },
                 configurable: true
             });
         }, { condition: (_, tag) => tag === 'iframe' });
+    }
 
+    // ==事件处理模块==
+    function eventApiInit() {
+        // URL变化监听
+        api.event.urlChange = api.factory('urlChange');
         function urlChangeApiInit() {
-            api.urlChange = api.factory('urlChange');
             function setHistoryHook(window_obj) {
                 const wrap = function (type) {
                     const origin = window_obj.history[type];
@@ -690,6 +546,7 @@ function easyApiInit() {
                     urlChange(event);
                 });
             }
+            let href = unsafeWindow.location.href;
             function urlChange(event = null) {
                 let destination_url;
                 if (typeof (event) === 'object') {
@@ -711,66 +568,137 @@ function easyApiInit() {
                 if (!destination_url.startsWith('http')) return;
                 if (destination_url === href) return;
                 const oldHref = href;
-                href = destination_url || location.href;
-                api.urlChange.trigger(this, href, oldHref);
+                href = destination_url || unsafeWindow.location.href;
+                api.event.urlChange.trigger(this, href, oldHref);
                 api.apiLog.info('网页url改变 href -> ' + href);
             }
             setHistoryHook(unsafeWindow);
         }
         urlChangeApiInit();
 
-        api.domContentLoaded = api.factory('domContentLoaded');
+        // DOM加载完成事件
+        api.event.domContentLoaded = api.factory('domContentLoaded');
         unsafeWindow.document.addEventListener('DOMContentLoaded', function () {
-            api.domContentLoaded.trigger(this);
+            api.event.domContentLoaded.trigger(this);
         });
 
-        api.addEventListener = api.factory('addEventListener', { modify: [0, 1] }, { stopPropagation: true, modify: [0, 1] });
+        // 事件监听器增强
+        api.event.addEventListener = api.factory('addEventListener', { modify: [0, 1] }, { stopPropagation: true, modify: [0, 1] });
         const origin_addEventListener = unsafeWindow.addEventListener;
         const fakeAddEventListener = function (tag, fun, options) {
-            [tag, fun, options] = api.addEventListener.trigger(this, tag, fun, options);
+            [tag, fun, options] = api.event.addEventListener.trigger(this, tag, fun, options);
             return origin_addEventListener.call(this, tag, fun, options);
         };
         api.utils.origin.hook('addEventListener', fakeAddEventListener);
 
-        api.message = {
+        // 双击处理 start
+        api.event.getDbclickAPI = function (node, handler, timeout = 300) {
+            if (node.inject_dbclick) return;
+            node.inject_dbclick = true;
+
+            let isClick = false;
+            let timers = new Set(); // 使用 Set 来管理定时器
+            const originOnclick = node.onclick;
+
+            // 清理所有定时器的函数
+            const clearAllTimers = () => {
+                timers.forEach(timer => clearTimeout(timer));
+                timers.clear();
+            };
+
+            const fakeOnclick = (e) => {
+                if (isClick) {
+                    isClick = false;
+                    originOnclick?.call(node, e);
+                    return;
+                }
+
+                e.preventDefault();
+                e.stopPropagation();
+                e.stopImmediatePropagation();
+
+                const timer = setTimeout(() => {
+                    isClick = true;
+                    clearAllTimers();
+                    node.click();
+                }, timeout);
+
+                timers.add(timer);
+            };
+
+            const dblclickHandler = (e) => {
+                e.preventDefault();
+                clearAllTimers();
+                handler.call(node, e); // 保持 this 上下文
+            };
+
+            return {
+                set: () => {
+                    node.onclick = null;
+                    // 使用 options 对象统一配置
+                    const eventOptions = {
+                        capture: true,
+                        passive: false // 明确声明不是被动事件
+                    };
+
+                    node.addEventListener('click', fakeOnclick, eventOptions);
+                    node.addEventListener('dblclick', dblclickHandler, eventOptions);
+                },
+                unset: () => {
+                    clearAllTimers(); // 清理遗留的定时器
+                    node.onclick = originOnclick;
+
+                    const eventOptions = { capture: true };
+                    node.removeEventListener('click', fakeOnclick, eventOptions);
+                    node.removeEventListener('dblclick', dblclickHandler, eventOptions);
+
+                    delete node.inject_dbclick; // 清理标记
+                }
+            };
+        };
+        // 双击处理 end
+
+        // message处理 start
+        api.event.message = {
             onMessage: api.factory('messageOnMessage'),
             postMessage: api.factory('postMessage', { modify: [0, 1] }, { stopPropagation: true, modify: [0, 1] })
         };
         const origin_postMessage = unsafeWindow.postMessage;
         function fakePostMessage(message, targetOrigin, transfer) {
-            [message, targetOrigin] = api.message.postMessage.trigger(this, message, targetOrigin);
+            [message, targetOrigin] = api.event.message.postMessage.trigger(this, message, targetOrigin);
             return origin_postMessage.call(this, message, targetOrigin, transfer);
         }
         api.utils.origin.hook('postMessage', fakePostMessage);
         const fakeOnMessage = function (event) {
-            const res = api.message.onMessage.trigger(this, event);
+            const res = api.event.message.onMessage.trigger(this, event);
             if (!res) return;
             event.stopPropagation();
             event.stopImmediatePropagation();
         };
 
         unsafeWindow.addEventListener('message', fakeOnMessage, { capture: true, priority: true });
-        api.addEventListener.subscribe((tag, fun, options) => {
+        api.event.addEventListener.subscribe((tag, fun, options) => {
             if (!options) return;
             options.capture = false;
             options.priority = false;
         }, { condition: tag => tag === 'message' });
-
+        // message处理 end
     }
 
-    function initNetapi() {
-        api.fetch = {};
-        api.fetch.response = api.factory('fetchResponse', { modify: 0 }, { stopPropagation: true, modify: 0 });
-        api.fetch.request = api.factory('fetchRequest', { modify: [0, 1] }, { stopPropagation: true });
-        Object.assign(api.fetch.response, {
-            json: api.factory('fetchResponseJson', {}, { stopPropagation: true }), // url, jsonData, requestbody
-            text: api.factory('fetchResponseText', { modify: 0 }, { modify: 0, stopPropagation: true, }), // url, text, requestbody
-            commonTextToJsonProcess: api.factory('commonTextToJsonProcess', {}, { stopPropagation: true, }),
-            processJson: function (json, rule, { traverse_all = false } = {}) {
-                rule && api.dataProcess.obj_process(json, rule, { traverse_all });
-                return true;
-            },
-        });
+    // ==网络请求模块==
+    function netApiInit() {
+        api.net = {};
+        api.net.fetch = {};
+        api.net.fetch.request = api.factory('fetchRequest', { modify: [0, 1] }, { stopPropagation: true });
+        api.net.fetch.response = api.factory('fetchResponse', { modify: 0 }, { stopPropagation: true, modify: 0 });
+        api.net.fetch.response.json = api.factory('fetchResponseJson', {}, { stopPropagation: true });
+        api.net.fetch.response.text = api.factory('fetchResponseText', { modify: 0 }, { modify: 0, stopPropagation: true, });
+        api.net.fetch.response.commonTextToJsonProcess = api.factory('commonTextToJsonProcess', {}, { stopPropagation: true, });
+        api.net.fetch.response.processJson = function (json, rule, { traverse_all = false } = {}) {
+            rule && api.data.dataProcess.obj_process(json, rule, { traverse_all });
+            return true;
+        };
+
         const origin_fetch = unsafeWindow.fetch;
         const fake_fetch = function () {
             const fetch_ = async function (uri, options) {
@@ -783,11 +711,11 @@ function easyApiInit() {
                         const save = text;
                         try {
                             const options = { body: uri.body_ };
-                            text = api.fetch.response.text.trigger(this, text, url, options);
+                            text = api.net.fetch.response.text.trigger(this, text, url, options);
                             if (text instanceof Promise) text = await text;
-                            if (api.fetch.response.commonTextToJsonProcess.matchCallbackNum(this, null, url, options)) {
+                            if (api.net.fetch.response.commonTextToJsonProcess.matchCallbackNum(this, null, url, options)) {
                                 let json = JSON.parse(text);
-                                api.fetch.response.commonTextToJsonProcess.trigger(this, json, url, options);
+                                api.net.fetch.response.commonTextToJsonProcess.trigger(this, json, url, options);
                                 text = JSON.stringify(json);
                             }
                         } catch (error) {
@@ -801,19 +729,19 @@ function easyApiInit() {
                     response.json = async function () {
                         let json = await originJson();
                         try {
-                            api.fetch.response.json.trigger(this, json, url, options);
+                            api.net.fetch.response.json.trigger(this, json, url, options);
                         } catch (error) {
                             api.apiLog.error('fetch response json error', error);
                             json = await cloneResponse.json();
                         }
                         return json;
                     };
-                    response = api.fetch.response.trigger(this, response, url, options);
+                    response = api.net.fetch.response.trigger(this, response, url, options);
                     return response;
                 }
                 let req;
                 try {
-                    if (typeof uri === 'string') [uri, options] = api.fetch.request.trigger(this, uri, options, 'fetch');
+                    if (typeof uri === 'string') [uri, options] = api.net.fetch.request.trigger(this, uri, options, 'fetch');
                     if (!(typeof uri === 'string' ? uri : uri.url)) return new Promise((resolve, reject) => reject('fetch error'));
                     req = origin_fetch(uri, options).then(fetch_request);
                 } catch (error) {
@@ -825,12 +753,11 @@ function easyApiInit() {
         }();
         api.utils.origin.hook('fetch', fake_fetch);
 
-
         class fakeRequest extends unsafeWindow.Request {
             constructor(input, options = void 0) {
                 if (typeof input === 'string') {
                     try {
-                        [input, options] = api.fetch.request.trigger(null, input, options, 'request');
+                        [input, options] = api.net.fetch.request.trigger(null, input, options, 'request');
                     } catch (error) {
                         api.apiLog.error('Request error', error);
                     }
@@ -842,7 +769,8 @@ function easyApiInit() {
         };
         api.utils.origin.hook('Request', fakeRequest);
 
-        api.xhr = {
+
+        api.net.xhr = {
             response: {
                 text: api.factory('xhrResponseText', { modify: 0 }, { stopPropagation: true, modify: 0 }),
                 json: api.factory('xhrResponseJson', {}, { stopPropagation: true }),
@@ -855,14 +783,14 @@ function easyApiInit() {
 
         class fakeXMLHttpRequest extends unsafeWindow.XMLHttpRequest {
             open(method, url, ...opts) {
-                [method, url, opts] = api.xhr.request.open.trigger(this, method, url, opts);
+                [method, url, opts] = api.net.xhr.request.open.trigger(this, method, url, opts);
                 if (url === '') return null;
                 this.url_ = url;
                 return super.open(method, url, ...opts);
             }
             send(body) {
                 let url;
-                [url, body] = api.xhr.request.send.trigger(this, this.url_, body);
+                [url, body] = api.net.xhr.request.send.trigger(this, this.url_, body);
                 if (url === '') {
                     const hook_get = (name, value) => {
                         api.utils.defineProperty(this, name, {
@@ -893,16 +821,16 @@ function easyApiInit() {
                     if (result_type === 'string') {
                         const options = { body: this.body_, xhr: this };
                         try {
-                            if (api.xhr.response.json.matchCallbackNum(this, null, url, options)) {
+                            if (api.net.xhr.response.json.matchCallbackNum(this, null, url, options)) {
                                 try {
                                     const json = JSON.parse(result);
-                                    api.xhr.response.json.trigger(this, json, url, options);
+                                    api.net.xhr.response.json.trigger(this, json, url, options);
                                     result = JSON.stringify(json);
                                 } catch (error) {
                                     api.apiLog.error(error);
                                 }
                             } else {
-                                result = api.xhr.response.text.trigger(this, result, options);
+                                result = api.net.xhr.response.text.trigger(this, result, options);
                             }
                         } catch (error) {
                             api.apiLog.error(error);
@@ -921,12 +849,12 @@ function easyApiInit() {
         };
         api.utils.origin.hook('XMLHttpRequest', fakeXMLHttpRequest);
 
-        api.iframe.contentWindow.subscribe((contentWindow) => {
+        api.dom.iframe.contentWindow.subscribe((contentWindow) => {
             api.utils.origin.injiect(contentWindow);
         });
 
         const dyncLoadFlags = ['iframe', 'img', 'script', 'link', 'video', 'audio', 'source', 'object'];
-        api.dyncFileLoad = api.factory('dyncFileLoad', { modify: 0 }, { stopPropagation: true, modify: 0 });
+        api.net.dyncFileLoad = api.factory('dyncFileLoad', { modify: 0 }, { stopPropagation: true, modify: 0 });
         const setterMap = {
             iframe: {
                 setter: Object.getOwnPropertyDescriptor(HTMLIFrameElement.prototype, 'src').set,
@@ -969,7 +897,7 @@ function easyApiInit() {
                 },
                 set: function (value) {
                     let url = value;
-                    const funSet = api.dyncFileLoad.matchCallback(this, value, node);
+                    const funSet = api.net.dyncFileLoad.matchCallback(this, value, node);
                     for (const [fun, options] of funSet) {
                         if (options.tag === node.tagName.toLowerCase()) {
                             const tmp = fun(url);
@@ -982,7 +910,7 @@ function easyApiInit() {
                 }
             });
             node.addEventListener('load', function (event) {
-                const funSet = api.dyncFileLoad.matchCallback(this, node.src, node);
+                const funSet = api.net.dyncFileLoad.matchCallback(this, node.src, node);
                 for (const [_, options] of funSet) {
                     if (options.tag === node.tagName.toLowerCase() && options.onload) {
                         const res = options.onload.call(event, node);
@@ -1007,8 +935,8 @@ function easyApiInit() {
                 }
             };
         };
-        api.createElement.subscribe((node) => {
-            const funSet = api.dyncFileLoad.manualTrigger(node);
+        api.dom.createElement.subscribe((node) => {
+            const funSet = api.net.dyncFileLoad.manualTrigger(node);
             for (const [_, options] of funSet) {
                 if (options.tag === node.tagName.toLowerCase()) {
                     hookSrc(node);
@@ -1018,7 +946,113 @@ function easyApiInit() {
         }, { condition: (_, tag) => dyncLoadFlags.includes(tag) });
     }
 
-    function dataProcessInit() {
+    // ==动画效果模块==
+    function animateApiInit() {
+        api.animate = {
+            backgroundFlash: function (decNode, options = {}) {
+                const {
+                    frequency = 100,
+                    isFront = false,
+                    timeout = 0
+                } = options;
+                let background_color_interval_id;
+                let originTransition;
+                let originColor;
+                const decProName = isFront ? 'color' : 'backgroundColor';
+                const startAnimation = () => {
+                    if (timeout > 0) {
+                        setTimeout(() => {
+                            closeAnimation();
+                        }, timeout);
+                    }
+                    originTransition = decNode.style.transition;
+                    originColor = decNode.style[decProName];
+                    decNode.style.transition = `${decNode.style.transition && (decNode.style.transition + " , ")}background-color 0.5s ease`;
+                    let lastTime = 0;
+                    const interval = frequency;
+                    const animate = (timestamp) => {
+                        if (timestamp - lastTime >= interval) {
+                            decNode.style[decProName] = api.utils.randomColor();
+                            lastTime = timestamp;
+                        }
+                        background_color_interval_id = requestAnimationFrame(animate);
+                    };
+                    background_color_interval_id = requestAnimationFrame(animate);
+                };
+
+                const closeAnimation = () => {
+                    if (!background_color_interval_id) return;
+                    cancelAnimationFrame(background_color_interval_id);
+                    decNode.style[decProName] = originColor;
+                    decNode.style.transition = originTransition;
+                };
+                return {
+                    start: startAnimation,
+                    close: closeAnimation
+                };
+            },
+            changeColor: function (decNode, options = {}) {
+                const {
+                    color = 'yellow',
+                    isFront = false,
+                    timeout = 0
+                } = options;
+                let decProName = isFront ? 'color' : 'backgroundColor';
+                let originColor = decNode.style[decProName];
+                decNode.style[decProName] = color;
+                if (timeout > 0) setTimeout(() => {
+                    decNode.style[decProName] = originColor;
+                }, timeout);
+                return () => {
+                    decNode.style[decProName] = originColor;
+                };
+            },
+            headerScan: function (decNode, color = 'yellow') {
+                let scanLine;
+                let styleElement;
+                const startAnimation = () => {
+                    styleElement = document.createElement('style');
+                    styleElement.innerHTML = `
+                                                @keyframes scan {
+                                                0%, 100% { top: 0; }
+                                                50% { top: calc(100% - 2px); }
+                                                }
+                                                 .avatar-container {
+                                                    position: relative;
+                                                    overflow: hidden;
+                                                }
+                                                .scan-line {
+                                                position: absolute;
+                                                top: 0;
+                                                left: 0;
+                                                width: 100%;
+                                                height: 2px;
+                                                background-color: ${color};
+                                                animation: scan 0.5s linear infinite;
+                                                }
+                                            `;
+                    unsafeWindow.document.head.appendChild(styleElement);
+                    scanLine = unsafeWindow.document.createElement('div');
+                    scanLine.className = 'scan-line';
+                    decNode.appendChild(scanLine);
+                    decNode.classList.add('avatar-container');
+                };
+                const closeAnimation = () => {
+                    scanLine.remove();
+                    styleElement.remove();
+                    decNode.classList.remove('avatar-container');
+                };
+                return {
+                    start: startAnimation,
+                    close: closeAnimation
+                };
+            }
+        }
+    }
+
+    // ==数据处理模块==
+    function dataApiInit() {
+        // ... 数据处理类实例 ...
         class DATA_PROCESS {
             constructor() {
                 this.obj_filter;
@@ -1125,7 +1159,7 @@ function easyApiInit() {
                 if (method_match) {
                     // eval 限制的时候可以使用num() obj()这些添加数字对象 方法也要放到unsafeWindow里 例：method(b("123",num(23)))
                     // 不限制的时候 不能使用num和obj 方法不需要放到unsafeWindow里 例：method(b("123",23))
-                    return eval(api.utils.trustedScript(method_match[1]));
+                    return eval(api.utils.security.trustedScript(method_match[1]));
                 }
                 const deal_obj_match = parse_value.match(/^dealObj\((.*)\)$/);
                 if (deal_obj_match) {
@@ -1151,7 +1185,7 @@ function easyApiInit() {
 
             string_to_value(obj, path) {
                 if (!path) throw new TypeError('path 为空');
-                return eval(api.utils.trustedScript(path.replace('json_obj', 'obj')));
+                return eval(api.utils.security.trustedScript(path.replace('json_obj', 'obj')));
             }
 
             get_lastPath_and_key(path) {
@@ -1839,7 +1873,25 @@ function easyApiInit() {
                 return true;
             }
         }
-        api.dataProcess = new DATA_PROCESS();
+        api.data.dataProcess = new DATA_PROCESS();
     }
-}
 
+    // 初始化所有API
+    utilsApiInit();
+    domApiInit()
+    eventApiInit()
+    dataApiInit()
+    netApiInit()
+    animateApiInit()
+    // 返回API对象
+    return api;
+})();
+
+// ==模块导出==
+if (typeof module !== 'undefined' && module.exports) {
+    module.exports = QuicklyModel;
+} else if (typeof define === 'function' && define.amd) {
+    define(function () { return QuicklyModel; });
+} else {
+    window.QuicklyModel = QuicklyModel;
+} 
