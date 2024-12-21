@@ -8,14 +8,19 @@
 
 
 (function () {
+    const version = '1.0.3';
     function QuicklyModel(options = {}) {
         // API命名空间
-        const config = {
+        const apiConfig = {
             debug: false,
+            disable: [],
         };
-        Object.assign(config, options);
+        Object.assign(apiConfig, options);
+        if (apiConfig.disable && !Array.isArray(apiConfig.disable)) {
+            apiConfig.disable = [apiConfig.disable];
+        }
         const api = {
-            version: '1.0.0',
+            version: version,
             factory: null,
             apiLog: null,
             dom: {
@@ -26,6 +31,7 @@
                 iframe: {}, // iframe操作相关
                 createElement: {}, // createElement增强
                 waitElement: {}, // waitElement实现
+                waitForRender: {}, // 等待元素渲染
             },
             event: {
                 urlChange: {}, // URL变化监听
@@ -355,10 +361,70 @@
                 defineProperty: function (obj, property, descriptor) {
                     const old_descriptor = Object.getOwnPropertyDescriptor(obj, property);
                     if (old_descriptor?.configurable === false) {
-                        api.apiLog.error(property, 'is not configurable, hook error !', old_descriptor);
-                        return;
+                        if (old_descriptor.writable === false) {
+                            api.apiLog.error(property, 'is not configurable and not writable !', old_descriptor);
+                            return;
+                        }else{
+                            if (descriptor.value){
+                                obj[property] = descriptor.value;
+                                if (descriptor.configurable === false) {
+                                    api.apiLog.warn(property, 'is not configurable ! but can set value !', old_descriptor);
+                                }
+                                return;
+                            } 
+                            api.apiLog.error(property, 'is not configurable , but can set value ! ', old_descriptor);
+                        }
                     }
                     Object.defineProperty(obj, property, descriptor);
+                },
+                debug: {
+                    analyzeObject: (obj, objName = 'object') => {
+                        const properties = Object.getOwnPropertyNames(obj);
+                        if (properties.length === 0) {
+                            api.apiLog.info('对象没有属性');
+                            return;
+                        };
+                        api.utils.console.group(`分析对象: ${objName}`);
+                        properties.forEach(prop => {
+                            try {
+                                const value = obj[prop];
+                                const type = typeof value;
+                                api.utils.console.group(`属性: ${prop} (类型: ${type})`);
+                                switch (type) {
+                                    case 'function':
+                                        // 输出函数定义
+                                        api.utils.console.log('函数定义:', value.toString());
+                                        // 尝试执行函数
+                                        try {
+                                            const result = value.call(obj);
+                                            api.utils.console.log('执行结果:', result);
+                                        } catch (execError) {
+                                            api.utils.console.error('函数执行失败:', execError.message);
+                                        }
+                                        break;
+                                    case 'object':
+                                        if (value === null) {
+                                            api.utils.console.log('值: null');
+                                        } else {
+                                            try {
+                                                api.utils.console.log('JSON表示:', JSON.stringify(value, null, 2));
+                                            } catch (jsonError) {
+                                                api.utils.console.error('无法转换为JSON:', jsonError.message);
+                                                api.utils.console.log('原始值:', value);
+                                            }
+                                        }
+                                        break;
+                                    default:
+                                        api.utils.console.log('值:', value);
+                                }
+
+                                api.utils.console.groupEnd();
+                            } catch (error) {
+                                api.utils.console.error(`无法访问属性 ${prop}:`, error.message);
+                            }
+                        });
+                        api.utils.console.groupEnd();
+                    }
                 },
                 ua: unsafeWindow.navigator.userAgent,
                 console: unsafeWindow.console,
@@ -378,10 +444,10 @@
                         const prefix = `%c${this.PREFIX}[${timestamp}][${level}]`;
                         const style = `color: ${this.LEVELS[level].color}; font-weight: bold;`;
 
-                        api.apiLog.log(prefix, style, ...args);
+                        api.utils.console.log(prefix, style, ...args);
 
                         if (level === 'ERROR') {
-                            api.apiLog.trace();
+                            api.utils.console.trace();
                         }
                     },
 
@@ -412,6 +478,10 @@
                 },
                 origin: {
                     hook: function (prop, value, global = unsafeWindow) {
+                        if (apiConfig.disable.includes(prop)) {
+                            api.apiLog.info(`${prop} 已禁用`);
+                            return
+                        };
                         let dec = global;
                         let lastProp = prop;
                         if (prop.includes('.')) {
@@ -444,8 +514,23 @@
                         }
                     }
                 },
+                urlParamsParse:function (url) {
+                if (!url) return {};
+                if (url.startsWith('//')) url = 'https:' + url;
+                try {
+                    const searchParams = new URLSearchParams(new URL(url).search);
+                    const params = {};
+                    for (const [key, value] of searchParams) {
+                            params[key] = value;
+                        }
+                    return params;
+                } catch (error) {
+                    api.apiLog.error('urlParamsParse error', error);
+                    return {};
+                }
+            }
 
-            };
+            }
             // 创建API工厂
             api.factory = api.utils.createApiFactory();
             // 创建日志记录器
@@ -468,7 +553,16 @@
             }
             api.utils.origin.hook('document.createElement', fakeCreateElement);
 
-            // waitElement实现
+            /**
+             * 等待元素出现
+             * @param {Node} observeNode 要观察的节点
+             * @param {Function} condition 条件函数,返回true表示找到目标元素
+             * @param {Object} options 配置选项
+             * @param {number} options.timeout 超时时间,默认10000ms
+             * @param {string} options.type 监听类型,'add'(新增)/'remove'(删除)/'none'(自定义),默认'add'
+             * @param {Object} options.observeOptions MutationObserver的配置项
+             * @returns {Promise<Node>} 返回找到的元素节点
+             */
             api.dom.waitElement = function (observeNode, condition, options = {}) {
                 return new Promise((resolve, reject) => {
                     const startTime = Date.now();
@@ -487,11 +581,12 @@
                             return;
                         }
                         for (let mutation of mutationsList) {
-                            if (mutation.type === 'childList' && mutation.addedNodes.length > 0) {
+                            if (mutation.type === 'childList') {
+                                let decNodes = [];
                                 if (type === 'add') {
-                                    decNodes = mutation.addedNodes;
+                                    decNodes = mutation.addedNodes || [];
                                 } else if (type === 'remove') {
-                                    decNodes = mutation.removedNodes;
+                                    decNodes = mutation.removedNodes || [];
                                 }
                                 for (let child of decNodes) {
                                     if (!condition(child)) continue;
@@ -506,6 +601,31 @@
                 });
             };
 
+            /**
+             * 等待元素渲染完成
+             * @param {Node} decNode 要观察的节点
+             * @param {string} expression 匹配表达式
+             * @param {Object} options 配置选项
+             * @param {number} options.timeout 超时时间,默认10000ms
+             * @param {string} options.type 匹配类型,'selector'/'class'/'id'/'name'/'tag',默认'selector'
+             * @returns {Promise<Node>} 返回找到的元素节点
+             */
+            api.dom.waitForRender = function (decNode, expression, options = {}) {
+                const { timeout = 10000 , type = 'selector' } = options;
+                if (!['selector', 'class', 'id', 'name', 'tag'].includes(type)) {
+                    return Promise.reject('waitForRender type error')
+                }
+                return api.dom.waitElement(decNode, (node) => {
+                    api.apiLog.info('waitForRender', node);
+                    if (type === 'selector') return node.querySelector(expression);
+                    if (type === 'class') return node.classList?.contains(expression);
+                    if (type === 'id') return node.id === expression;
+                    if (type === 'name') return node.name === expression;
+                    if (type === 'tag') return node.tagName === expression;
+                    return false;
+                }, { timeout });
+            };
+
             // iframe处理
             api.dom.iframe = {
                 oncreate: api.factory('frameOncreate'),
@@ -513,6 +633,10 @@
             };
             api.dom.createElement.subscribe((node) => {
                 api.dom.iframe.oncreate.trigger(node);
+                if (apiConfig.disable.includes('contentWindow')) {
+                    api.apiLog.info('contentWindow 已禁用');
+                    return;
+                };
                 const contentWindow_getter = Object.getOwnPropertyDescriptor(HTMLIFrameElement.prototype, "contentWindow").get;
                 api.utils.defineProperty(node, 'contentWindow', {
                     get: function () {
@@ -679,7 +803,10 @@
             const origin_postMessage = unsafeWindow.postMessage;
             function fakePostMessage(message, targetOrigin, transfer) {
                 [message, targetOrigin] = api.event.message.postMessage.trigger(this, message, targetOrigin);
-                return origin_postMessage.call(this, message, targetOrigin, transfer);
+                const args = [message];
+                if (targetOrigin) args.push(targetOrigin);
+                if (transfer) args.push(transfer);
+                return origin_postMessage.call(this, ...args);
             }
             api.utils.origin.hook('postMessage', fakePostMessage);
             const fakeOnMessage = function (event) {
@@ -702,7 +829,7 @@
         function netApiInit() {
             api.net = {};
             api.net.fetch = {};
-            api.net.fetch.request = api.factory('fetchRequest', { modify: [0, 1] }, { stopPropagation: true });
+            api.net.fetch.request = api.factory('fetchRequest', { modify: 0 }, { stopPropagation: true, modify: 0 });
             api.net.fetch.response = api.factory('fetchResponse', { modify: 0 }, { stopPropagation: true, modify: 0 });
             api.net.fetch.response.json = api.factory('fetchResponseJson', {}, { stopPropagation: true });
             api.net.fetch.response.text = api.factory('fetchResponseText', { modify: 0 }, { modify: 0, stopPropagation: true, });
@@ -723,7 +850,7 @@
                             // const start = performance.now();
                             const save = text;
                             try {
-                                const options = { body: uri.body_ };
+                                const options = { body: uri.body_ , params: api.utils.urlParamsParse(url) };
                                 text = api.net.fetch.response.text.trigger(this, text, url, options);
                                 if (text instanceof Promise) text = await text;
                                 if (api.net.fetch.response.commonTextToJsonProcess.matchCallbackNum(this, null, url, options)) {
@@ -754,7 +881,9 @@
                     }
                     let req;
                     try {
-                        if (typeof uri === 'string') [uri, options] = api.net.fetch.request.trigger(this, uri, options, 'fetch');
+                        if (!options) options = {};
+                        options.params = api.utils.urlParamsParse(uri);
+                        if (typeof uri === 'string') uri = api.net.fetch.request.trigger(this, uri, options, 'fetch');
                         if (!(typeof uri === 'string' ? uri : uri.url)) return new Promise((resolve, reject) => reject('fetch error'));
                         req = origin_fetch(uri, options).then(fetch_request);
                     } catch (error) {
@@ -765,12 +894,12 @@
                 return fetch_;
             }();
             api.utils.origin.hook('fetch', fake_fetch);
-
-            class fakeRequest extends unsafeWindow.Request {
-                constructor(input, options = void 0) {
+            
+            const fakeRequest = class extends unsafeWindow.Request {
+                constructor(input, options = {}) {
                     if (typeof input === 'string') {
                         try {
-                            [input, options] = api.net.fetch.request.trigger(null, input, options, 'request');
+                            input = api.net.fetch.request.trigger(null, input, options, 'request');
                         } catch (error) {
                             api.apiLog.error('Request error', error);
                         }
@@ -780,8 +909,24 @@
                     if (options && 'body' in options) this['body_'] = options['body'];
                 }
             };
-            api.utils.origin.hook('Request', fakeRequest);
+            api.utils.origin.hook('Request', fakeRequest); 
 
+            // const OriginalRequest = unsafeWindow.Request;
+
+            // unsafeWindow.Request = new Proxy(OriginalRequest, {
+            //     construct(target, args) {
+            //         const [input, options = {}] = args;0.0 .
+            //         debugger
+            //         // 校验 signal 是否有效
+            //         if (options.signal && !(options.signal instanceof unsafeWindow.AbortSignal)) {
+            //             console.warn("Invalid AbortSignal detected, removing 'signal' from options.");
+            //             delete options.signal;
+            //         }
+
+            //         // 创建原始 Request 实例
+            //         return new target(input, options);
+            //     }
+            // });
 
             api.net.xhr = {
                 response: {
@@ -789,21 +934,21 @@
                     json: api.factory('xhrResponseJson', {}, { stopPropagation: true }),
                 },
                 request: {
-                    open: api.factory('xhrRequestOpen', { modify: [0, 1, 2] }, { stopPropagation: true }),
-                    send: api.factory('xhrRequestSend', { modify: [0, 1] }, { stopPropagation: true }),
+                    open: api.factory('xhrRequestOpen', { modify: [0] }, { stopPropagation: true, modify: [0] }),
+                    send: api.factory('xhrRequestSend', { modify: [0, 1] }, { stopPropagation: true, modify: [0, 1] }),
                 }
             };
 
             class fakeXMLHttpRequest extends unsafeWindow.XMLHttpRequest {
                 open(method, url, ...opts) {
-                    [method, url, opts] = api.net.xhr.request.open.trigger(this, method, url, opts);
+                    url = api.net.xhr.request.open.trigger(this, url, opts);
                     if (url === '') return null;
                     this.url_ = url;
                     return super.open(method, url, ...opts);
                 }
                 send(body) {
                     let url;
-                    [url, body] = api.net.xhr.request.send.trigger(this, this.url_, body);
+                    [body, url] = api.net.xhr.request.send.trigger(this, body , this.url_);
                     if (url === '') {
                         const hook_get = (name, value) => {
                             api.utils.defineProperty(this, name, {
@@ -843,7 +988,7 @@
                                         api.apiLog.error(error);
                                     }
                                 } else {
-                                    result = api.net.xhr.response.text.trigger(this, result, options);
+                                    result = api.net.xhr.response.text.trigger(this, result, url, options);
                                 }
                             } catch (error) {
                                 api.apiLog.error(error);
@@ -948,6 +1093,10 @@
                     }
                 };
             };
+            if (apiConfig.disable.includes('dyncFileLoad')) {
+                api.apiLog.info('dyncFileLoad 已禁用');
+                return;
+            }
             api.dom.createElement.subscribe((node) => {
                 const funSet = api.net.dyncFileLoad.manualTrigger(node);
                 for (const [_, options] of funSet) {
@@ -1898,7 +2047,11 @@
         netApiInit();
         animateApiInit();
         // 返回API对象
+        unsafeWindow.debug_ = api.utils.debug;
         return api;
     };
-    return QuicklyModel;
+    return {
+        version: version,
+        createApi: QuicklyModel
+    };
 })();
