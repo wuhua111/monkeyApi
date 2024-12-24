@@ -11,14 +11,21 @@
     const version = '1.0.3';
     function QuicklyModel(options = {}) {
         // API命名空间
+        // 可以控制启停的api: createElement addEventListener message fetch request xhr webSocket dyncFileLoad json
+        const defaultEnable = new Set(['createElement', 'iframe', 'fetch', 'xhr', 'request']);
+        if (options.enable) {
+            options.enable.forEach((item) => defaultEnable.add(item));
+            delete options.enable;
+        }
+        if (options.disable) {
+            options.disable.forEach((item) => defaultEnable.delete(item));
+            delete options.disable;
+        }
         const apiConfig = {
-            debug: false,
-            disable: [],
+            dev: false,
+            enable: defaultEnable
         };
         Object.assign(apiConfig, options);
-        if (apiConfig.disable && !Array.isArray(apiConfig.disable)) {
-            apiConfig.disable = [apiConfig.disable];
-        }
         const api = {
             version: version,
             factory: null,
@@ -41,20 +48,28 @@
                 message: {}, // 消息
             },
             net: {
+                // 网络请求相关
                 xhr: {}, // XMLHttpRequest增强
                 fetch: {}, // fetch增强
                 dyncFileLoad: {}, // 动态文件加载
-            },      // 网络请求相关
+            },
             utils: {
                 security: {},
                 type: {}
             },
             animate: {
-                background: {}, // 背景动画
-                color: {}, // 颜色动画
-                scan: {} // 扫描动画
+                flash: {}, // 背景或者字体闪烁动画
+                frontColor: {}, // 颜色动画
+                scanLine: {} // 扫描动画
             },
-            data: {}      // 数据处理
+            data: {
+                // 数据处理
+                json: {
+                    parase: null, // JSON.parse hook 默认关闭，需要enbale 开启
+                    stringify: null // JSON.stringify hook 默认关闭，需要enbale 开启
+                },
+                dataProcess: {} // 大文本数据处理
+            }
         };
 
         // ==工具函数模块==
@@ -324,15 +339,19 @@
                         } catch (error) {
                             if (unsafeWindow.trustedTypes) {
                                 const policy = unsafeWindow.trustedTypes.createPolicy('eval', {
-                                    createScript: (script) => script
+                                    createScript: function (scriptText) {
+                                        return scriptText;
+                                    }
                                 });
-                                return function (str) {
-                                    return policy.createScript(str);
+                                return function (scriptText) {
+                                    return policy.createScript(scriptText);
                                 };
                             } else {
-                                api.apiLog.error('trustedTypes not support', error);
+                                return function (text) {
+                                    return text;
+                                };
                             }
-                        };
+                        }
                     })()
                 },
                 type: {
@@ -364,20 +383,20 @@
                         if (old_descriptor.writable === false) {
                             api.apiLog.error(property, 'is not configurable and not writable !', old_descriptor);
                             return;
-                        }else{
-                            if (descriptor.value){
+                        } else {
+                            if (descriptor.value) {
                                 obj[property] = descriptor.value;
                                 if (descriptor.configurable === false) {
                                     api.apiLog.warn(property, 'is not configurable ! but can set value !', old_descriptor);
                                 }
                                 return;
-                            } 
+                            }
                             api.apiLog.error(property, 'is not configurable , but can set value ! ', old_descriptor);
                         }
                     }
                     Object.defineProperty(obj, property, descriptor);
                 },
-                debug: {
+                debugHelper: {
                     analyzeObject: (obj, objName = 'object') => {
                         const properties = Object.getOwnPropertyNames(obj);
                         if (properties.length === 0) {
@@ -428,60 +447,149 @@
                 },
                 ua: unsafeWindow.navigator.userAgent,
                 console: unsafeWindow.console,
-                Logger: {
-                    PREFIX: '[Logger]',
-                    LEVELS: {
-                        DEBUG: { name: 'DEBUG', color: '#7f8c8d', show: true },
-                        INFO: { name: 'INFO', color: '#2ecc71', show: true },
-                        WARN: { name: 'WARN', color: '#f1c40f', show: true },
-                        ERROR: { name: 'ERROR', color: '#e74c3c', show: true }
-                    },
-
-                    _log(level, ...args) {
-                        if (!this.LEVELS[level].show) return;
-
-                        const timestamp = new Date().toISOString().split('T')[1].split('.')[0];
-                        const prefix = `%c${this.PREFIX}[${timestamp}][${level}]`;
-                        const style = `color: ${this.LEVELS[level].color}; font-weight: bold;`;
-
-                        api.utils.console.log(prefix, style, ...args);
-
-                        if (level === 'ERROR') {
-                            api.utils.console.trace();
+                Logger: class {
+                    constructor(options = {}) {
+                        const { moduleName = '', ...otherOptions } = options;
+                        this.options = {
+                            enabled: true, // 是否启用日志
+                            prefix: '[Logger]', // 日志前缀
+                            showTimestamp: true, // 是否显示时间戳
+                            showTrace: true, // 是否显示错误追踪
+                            maxLogLength: 1000, // 单条日志最大长度
+                            showInConsole: true, // 是否在控制台显示
+                            maxLogStorage: 1000, // 最大存储日志条数
+                            levels: {
+                                DEBUG: { name: 'DEBUG', color: '#7f8c8d', show: true },
+                                INFO: { name: 'INFO', color: '#2ecc71', show: true },
+                                WARN: { name: 'WARN', color: '#f1c40f', show: true },
+                                ERROR: { name: 'ERROR', color: '#e74c3c', show: true }
+                            },
+                            ...otherOptions
+                        };
+                        // 如果提供了模块名,添加到前缀中
+                        if (moduleName) {
+                            this.options.prefix = `${this.options.prefix}[${moduleName}]`;
                         }
-                    },
+                        // 日志存储
+                        this.logStorage = [];
+                    }
+                    _log(level, ...args) {
+                        if (!this.options.enabled || !this.options.levels[level].show) return;
+                        // 处理日志内容
+                        let logContent = args.map(arg => {
+                            if (typeof arg === 'object') {
+                                try {
+                                    return JSON.stringify(arg);
+                                } catch (e) {
+                                    return arg.toString();
+                                }
+                            }
+                            return arg;
+                        }).join(' ');
+                        // 截断过长日志
+                        if (logContent.length > this.options.maxLogLength) {
+                            logContent = logContent.substring(0, this.options.maxLogLength) + '...';
+                        }
+                        // 构建日志前缀
+                        const parts = [this.options.prefix];
+                        if (this.options.showTimestamp) {
+                            const timestamp = new Date().toISOString().split('T')[1].split('.')[0];
+                            parts.push(`[${timestamp}]`);
+                        }
+                        parts.push(`[${level}]`);
+                        const prefix = parts.join('');
+                        const style = `color: ${this.options.levels[level].color}; font-weight: bold;`;
+                        // 保存日志
+                        this.logStorage.push({
+                            timestamp: new Date(),
+                            level,
+                            prefix,
+                            content: logContent
+                        });
+                        // 控制日志存储大小
+                        if (this.logStorage.length > this.options.maxLogStorage) {
+                            this.logStorage.shift();
+                        }
+                        // 输出日志到控制台
+                        if (this.options.showInConsole) {
+                            api.utils.console.log(`%c${prefix}`, style, logContent);
 
+                            // 错误追踪
+                            if (level === 'ERROR' && this.options.showTrace) {
+                                api.utils.console.trace();
+                            }
+                        }
+                    }
                     debug(...args) {
                         this._log('DEBUG', ...args);
-                    },
-
+                    }
                     info(...args) {
                         this._log('INFO', ...args);
-                    },
-
+                    }
                     warn(...args) {
                         this._log('WARN', ...args);
-                    },
-
+                    }
                     error(...args) {
                         this._log('ERROR', ...args);
-                    },
-
-                    scope(moduleName) {
-                        return {
-                            debug: (...args) => this._log('DEBUG', `[${moduleName}]`, ...args),
-                            info: (...args) => this._log('INFO', `[${moduleName}]`, ...args),
-                            warn: (...args) => this._log('WARN', `[${moduleName}]`, ...args),
-                            error: (...args) => this._log('ERROR', `[${moduleName}]`, ...args)
-                        };
+                    }
+                    // 工具方法
+                    setEnabled(enabled) {
+                        this.options.enabled = enabled;
+                    }
+                    setShowInConsole(show) {
+                        this.options.showInConsole = show;
+                    }
+                    setLevel(level, show) {
+                        if (this.options.levels[level]) {
+                            this.options.levels[level].show = show;
+                        }
+                    }
+                    setAllLevels(show) {
+                        Object.keys(this.options.levels).forEach(level => {
+                            this.options.levels[level].show = show;
+                        });
+                    }
+                    // 日志获取方法
+                    getLogs(options = {}) {
+                        const {
+                            level,
+                            startTime,
+                            endTime,
+                            search,
+                            limit
+                        } = options;
+                        let filteredLogs = this.logStorage;
+                        // 按级别筛选
+                        if (level) {
+                            filteredLogs = filteredLogs.filter(log => log.level === level);
+                        }
+                        // 按时间范围筛选
+                        if (startTime) {
+                            filteredLogs = filteredLogs.filter(log => log.timestamp >= startTime);
+                        }
+                        if (endTime) {
+                            filteredLogs = filteredLogs.filter(log => log.timestamp <= endTime);
+                        }
+                        // 按内容搜索
+                        if (search) {
+                            const searchLower = search.toLowerCase();
+                            filteredLogs = filteredLogs.filter(log =>
+                                log.content.toLowerCase().includes(searchLower)
+                            );
+                        }
+                        // 限制返回数量
+                        if (limit) {
+                            filteredLogs = filteredLogs.slice(-limit);
+                        }
+                        return filteredLogs;
+                    }
+                    // 清除日志
+                    clearLogs() {
+                        this.logStorage = [];
                     }
                 },
                 origin: {
                     hook: function (prop, value, global = unsafeWindow) {
-                        if (apiConfig.disable.includes(prop)) {
-                            api.apiLog.info(`${prop} 已禁用`);
-                            return
-                        };
                         let dec = global;
                         let lastProp = prop;
                         if (prop.includes('.')) {
@@ -492,8 +600,8 @@
                             });
                         }
                         const originFun = dec[lastProp];
-                        if (!api.utils.type.isNative(lastProp, originFun)) {
-                            api.apiLog.error(`${lastProp} have been modified`);
+                        if (typeof originFun === 'function' && !api.utils.type.isNative(lastProp, originFun)) {
+                            api.apiLog.warn(`${lastProp} have been modified`);
                         }
                         if (typeof value !== 'function' && !api.utils.type.isClassInstance(value)) {
                             const descriptor = value;
@@ -514,27 +622,138 @@
                         }
                     }
                 },
-                urlParamsParse:function (url) {
-                if (!url) return {};
-                if (url.startsWith('//')) url = 'https:' + url;
-                try {
-                    const searchParams = new URLSearchParams(new URL(url).search);
-                    const params = {};
-                    for (const [key, value] of searchParams) {
+                importElementPlus: function () {
+                    const request = (url) => {
+                        return new Promise((resolve, reject) => {
+                            GM_xmlhttpRequest(
+                                {
+                                    method: 'GET',
+                                    timeout: 30000,
+                                    url: url,
+                                    onload: function (response) {
+                                        (response.status == 200 ? resolve : reject)(response.responseText);
+                                    },
+                                    ontimeout: function () {
+                                        reject('timeout');
+                                    },
+                                    onerror: function (error) {
+                                        reject(error);
+                                    }
+                                }
+                            );
+                        });
+                    };
+                    const createElement = function (tag, content, parent) {
+                        const node = unsafeWindow.document.createElement(tag);
+                        node.textContent = content;
+                        parent.appendChild(node);
+                        return node;
+                    };
+                    const importScript = function (vuetifyCss, vueJs, elementPlusJs) {
+                        createElement('style', vuetifyCss, unsafeWindow.document.head);
+                        createElement('script', vueJs, unsafeWindow.document.head);
+                        createElement('script', elementPlusJs, unsafeWindow.document.head);
+                        Vue = unsafeWindow.Vue;
+                        ElementPlus = unsafeWindow.ElementPlus;
+                        const elementPlusInit = Boolean(Vue && ElementPlus);
+                        return elementPlusInit;
+                    };
+                    const importScriptVersion = GM_getValue('importScriptVersion');
+                    if (importScriptVersion && importScriptVersion === GM_info.script.version) {
+                        const elementPlusJs = GM_getValue('elementPlusJs');
+                        const vuetifyCss = GM_getValue('vuetifyCss');
+                        const vueJs = GM_getValue('vueJs');
+                        if (elementPlusJs && vuetifyCss && vueJs) {
+                            importScript(vuetifyCss, vueJs, elementPlusJs);
+                            return Promise.resolve({ ElementPlus: unsafeWindow.ElementPlus, Vue: unsafeWindow.Vue });
+                        }
+                    }
+                    const vuetifyCssulr = 'https://unpkg.com/element-plus/dist/index.css';
+                    const cssPromise = request(vuetifyCssulr);
+                    const vueJsUrl = 'https://unpkg.com/vue@3/dist/vue.global.js';
+                    const jsPromise = request(vueJsUrl);
+                    return new Promise((resolve, reject) => {
+                        Promise.all([cssPromise, jsPromise]).then((result) => {
+                            const vuetifyCss = result[0];
+                            GM_setValue('vuetifyCss', vuetifyCss);
+                            const vueJs = result[1];
+                            GM_setValue('vueJs', vueJs);
+                            const elementPlusUrl = 'https://unpkg.com/element-plus';
+                            request(elementPlusUrl).then((result) => {
+                                const replaceText = `typeof exports === 'object' && typeof module !== 'undefined' ? factory(exports, require('vue')) :
+  typeof define === 'function' && define.amd ? define(['exports', 'vue'], factory) :
+  (global = typeof globalThis !== 'undefined' ? globalThis : global || self, factory(global.ElementPlus = {}, global.Vue));`;
+                                const elementPlusJs = result.replace(replaceText,
+                                    'global = window;factory(global.ElementPlus = {}, global.Vue);'
+                                );
+                                GM_setValue('elementPlusJs', elementPlusJs);
+                                GM_setValue('importScriptVersion', GM_info.script.version);
+                                importScript(vuetifyCss, vueJs, elementPlusJs);
+                                if (elementPlusInit) {
+                                    resolve({ ElementPlus: unsafeWindow.ElementPlus, Vue: unsafeWindow.Vue });
+                                } else {
+                                    reject('importElementPlus 失败');
+                                }
+                            }).catch((error) => {
+                                reject(error);
+                            });
+                        }).catch((error) => {
+                            reject(error);
+                        });
+                    });
+                },
+                urlParamsParse: function (url) {
+                    if (!url) return {};
+                    if (typeof url === 'object') url = url.url;
+                    if (typeof url !== 'string') return {};
+                    const uri = url.split('?')[0];
+                    if (url.startsWith('//')) url = 'https:' + url;
+                    if (url.startsWith('/')) url = unsafeWindow.location.origin + url;
+                    try {
+                        const searchParams = new URLSearchParams(new URL(url).search);
+                        const params = {};
+                        for (const [key, value] of searchParams) {
                             params[key] = value;
                         }
-                    return params;
-                } catch (error) {
-                    api.apiLog.error('urlParamsParse error', error);
-                    return {};
+                        return {
+                            params,
+                            uri
+                        };
+                    } catch (error) {
+                        api.apiLog.error('urlParamsParse error', error);
+                        return {
+                            params,
+                            uri
+                        };
+                    }
+                },
+                urlParamsMerge: function (url, params) {
+                    return url + '?' + new URLSearchParams(params).toString();
+                },
+                getCookie: function (cookieName) {
+                    const name = cookieName + "=";
+                    let decodedCookie;
+                    try {
+                        decodedCookie = decodeURIComponent(document.cookie);
+                    } catch (error) {
+                        api.apiLog.error('cookie decode error');
+                        return null;
+                    }
+                    const cookieArray = decodedCookie.split(';');
+                    for (let i = 0; i < cookieArray.length; i++) {
+                        const cookie = cookieArray[i].trim();
+                        if (cookie.startsWith(name)) {
+                            return cookie.substring(name.length, cookie.length);
+                        }
+                    }
+                    return null;
                 }
-            }
+            };
 
-            }
             // 创建API工厂
             api.factory = api.utils.createApiFactory();
             // 创建日志记录器
-            api.apiLog = api.utils.Logger.scope('API');
+            api.apiLog = new api.utils.Logger({ moduleName: 'API', showInConsole: apiConfig.dev });
         }
 
         // ==DOM操作模块==
@@ -543,15 +762,20 @@
             api.dom.query.$ = unsafeWindow.document.querySelector.bind(unsafeWindow.document);
             api.dom.query.$$ = unsafeWindow.document.querySelectorAll.bind(unsafeWindow.document);
 
-            // createElement增强
-            api.dom.createElement = api.factory('createElement');
-            const origin_createElement = unsafeWindow.document.createElement;
-            function fakeCreateElement(tag, options) {
-                let node = origin_createElement.call(this, tag, options);
-                api.dom.createElement.trigger(this, node, tag, options);
-                return node;
-            }
-            api.utils.origin.hook('document.createElement', fakeCreateElement);
+            const enableCreateElement = () => {
+                // createElement增强
+                api.dom.createElement = api.factory('createElement');
+                const origin_createElement = unsafeWindow.document.createElement;
+                function fakeCreateElement(tag, options) {
+                    let node = origin_createElement.call(this, tag, options);
+                    api.dom.createElement.trigger(this, node, tag, options);
+                    return node;
+                }
+                api.utils.origin.hook('document.createElement', fakeCreateElement);
+            };
+            if (apiConfig.enable.has('createElement')) {
+                enableCreateElement();
+            };
 
             /**
              * 等待元素出现
@@ -564,6 +788,7 @@
              * @returns {Promise<Node>} 返回找到的元素节点
              */
             api.dom.waitElement = function (observeNode, condition, options = {}) {
+                if (!observeNode || observeNode?.nodeType !== 1) return Promise.reject('waitForRender observeNode error');
                 return new Promise((resolve, reject) => {
                     const startTime = Date.now();
                     const { timeout = 10000, type = 'add', observeOptions = { childList: true, subtree: true } } = options;
@@ -611,9 +836,9 @@
              * @returns {Promise<Node>} 返回找到的元素节点
              */
             api.dom.waitForRender = function (decNode, expression, options = {}) {
-                const { timeout = 10000 , type = 'selector' } = options;
+                const { timeout = 10000, type = 'selector' } = options;
                 if (!['selector', 'class', 'id', 'name', 'tag'].includes(type)) {
-                    return Promise.reject('waitForRender type error')
+                    return Promise.reject('waitForRender type error');
                 }
                 return api.dom.waitElement(decNode, (node) => {
                     api.apiLog.info('waitForRender', node);
@@ -627,32 +852,45 @@
             };
 
             // iframe处理
-            api.dom.iframe = {
-                oncreate: api.factory('frameOncreate'),
-                contentWindow: api.factory('frameOnget'),
-            };
-            api.dom.createElement.subscribe((node) => {
-                api.dom.iframe.oncreate.trigger(node);
-                if (apiConfig.disable.includes('contentWindow')) {
-                    api.apiLog.info('contentWindow 已禁用');
-                    return;
+            const enableIframe = () => {
+                api.dom.iframe = {
+                    oncreate: api.factory('frameOncreate'),
+                    contentWindow: api.factory('frameOnget'),
                 };
-                const contentWindow_getter = Object.getOwnPropertyDescriptor(HTMLIFrameElement.prototype, "contentWindow").get;
-                api.utils.defineProperty(node, 'contentWindow', {
-                    get: function () {
-                        const contentWindow = contentWindow_getter.call(node);
-                        delete node.contentWindow;
-                        if (!contentWindow || this.src !== 'about:blank') return contentWindow;
-                        api.dom.iframe.contentWindow.trigger(this, contentWindow, node);
-                        return contentWindow;
-                    },
-                    configurable: true
-                });
-            }, { condition: (_, tag) => tag === 'iframe' });
+                api.dom.createElement.subscribe((node) => {
+                    api.dom.iframe.oncreate.trigger(node);
+                    const contentWindow_getter = Object.getOwnPropertyDescriptor(HTMLIFrameElement.prototype, "contentWindow").get;
+                    api.utils.defineProperty(node, 'contentWindow', {
+                        get: function () {
+                            const contentWindow = contentWindow_getter.call(node);
+                            delete node.contentWindow;
+                            if (!contentWindow || this.src !== 'about:blank') return contentWindow;
+                            api.dom.iframe.contentWindow.trigger(this, contentWindow, node);
+                            return contentWindow;
+                        },
+                        configurable: true
+                    });
+                }, { condition: (_, tag) => tag === 'iframe' });
+            };
+
+            if (apiConfig.enable.has('iframe')) {
+                if (!apiConfig.enable.has('createElement')) {
+                    api.apiLog.warn('createElement 未启用,iframe 功能将无法正常使用');
+                } else {
+                    enableIframe();
+                }
+            }
         }
 
         // ==事件处理模块==
         function eventApiInit() {
+
+            // DOM加载完成事件
+            api.event.domContentLoaded = api.factory('domContentLoaded');
+            unsafeWindow.document.addEventListener('DOMContentLoaded', function () {
+                api.event.domContentLoaded.trigger(this);
+            });
+
             // URL变化监听
             api.event.urlChange = api.factory('urlChange');
             function urlChangeApiInit() {
@@ -707,29 +945,31 @@
                     const oldHref = href;
                     href = destination_url || unsafeWindow.location.href;
                     api.event.urlChange.trigger(this, href, oldHref);
-                    api.apiLog.info('网页url改变 href -> ' + href);
+                    // api.apiLog.info('网页url改变 href -> ' + href);
                 }
                 setHistoryHook(unsafeWindow);
+                api.event.domContentLoaded.subscribe(() => {
+                    urlChange(unsafeWindow.location.href);
+                });
             }
             urlChangeApiInit();
 
-            // DOM加载完成事件
-            api.event.domContentLoaded = api.factory('domContentLoaded');
-            unsafeWindow.document.addEventListener('DOMContentLoaded', function () {
-                api.event.domContentLoaded.trigger(this);
-            });
-
             // 事件监听器增强
-            api.event.addEventListener = api.factory('addEventListener', { modify: [0, 1] }, { stopPropagation: true, modify: [0, 1] });
-            const origin_addEventListener = unsafeWindow.addEventListener;
-            const fakeAddEventListener = function (tag, fun, options) {
-                [tag, fun, options] = api.event.addEventListener.trigger(this, tag, fun, options);
-                return origin_addEventListener.call(this, tag, fun, options);
+            const enableEventListener = () => {
+                api.event.addEventListener = api.factory('addEventListener', { modify: [0, 1] }, { stopPropagation: true, modify: [0, 1] });
+                const origin_addEventListener = unsafeWindow.addEventListener;
+                const fakeAddEventListener = function (tag, fun, options) {
+                    [tag, fun, options] = api.event.addEventListener.trigger(this, tag, fun, options);
+                    return origin_addEventListener.call(this, tag, fun, options);
+                };
+                api.utils.origin.hook('addEventListener', fakeAddEventListener);
             };
-            api.utils.origin.hook('addEventListener', fakeAddEventListener);
+
+            if (apiConfig.enable.has('addEventListener')) enableEventListener();
 
             // 双击处理 start
             api.event.getDbclickAPI = function (node, handler, timeout = 300) {
+                if (!node || node?.nodeType !== 1) return Promise.reject('getDbclickAPI node error');
                 if (node.inject_dbclick) return;
                 node.inject_dbclick = true;
 
@@ -796,322 +1036,429 @@
             // 双击处理 end
 
             // message处理 start
-            api.event.message = {
-                onMessage: api.factory('messageOnMessage'),
-                postMessage: api.factory('postMessage', { modify: [0, 1] }, { stopPropagation: true, modify: [0, 1] })
-            };
-            const origin_postMessage = unsafeWindow.postMessage;
-            function fakePostMessage(message, targetOrigin, transfer) {
-                [message, targetOrigin] = api.event.message.postMessage.trigger(this, message, targetOrigin);
-                const args = [message];
-                if (targetOrigin) args.push(targetOrigin);
-                if (transfer) args.push(transfer);
-                return origin_postMessage.call(this, ...args);
-            }
-            api.utils.origin.hook('postMessage', fakePostMessage);
-            const fakeOnMessage = function (event) {
-                const res = api.event.message.onMessage.trigger(this, event);
-                if (!res) return;
-                event.stopPropagation();
-                event.stopImmediatePropagation();
-            };
+            const enableMessage = () => {
+                api.event.message = {
+                    onMessage: api.factory('messageOnMessage'),
+                    postMessage: api.factory('postMessage', { modify: [0, 1] }, { stopPropagation: true, modify: [0, 1] })
+                };
 
-            unsafeWindow.addEventListener('message', fakeOnMessage, { capture: true, priority: true });
-            api.event.addEventListener.subscribe((tag, fun, options) => {
-                if (!options) return;
-                options.capture = false;
-                options.priority = false;
-            }, { condition: tag => tag === 'message' });
+                const origin_postMessage = unsafeWindow.postMessage;
+                function fakePostMessage(message, targetOrigin, transfer) {
+                    [message, targetOrigin] = api.event.message.postMessage.trigger(this, message, targetOrigin);
+                    const args = [message];
+                    if (targetOrigin) args.push(targetOrigin);
+                    if (transfer) args.push(transfer);
+                    return origin_postMessage.call(this, ...args);
+                }
+
+                api.utils.origin.hook('postMessage', fakePostMessage);
+                const fakeOnMessage = function (event) {
+                    const res = api.event.message.onMessage.trigger(this, event);
+                    if (!res) return;
+                    event.stopPropagation();
+                    event.stopImmediatePropagation();
+                };
+
+                unsafeWindow.addEventListener('message', fakeOnMessage, { capture: true, priority: true });
+
+                api.event.addEventListener.subscribe((tag, fun, options) => {
+                    if (!options) return;
+                    options.capture = false;
+                    options.priority = false;
+                }, { condition: tag => tag === 'message' });
+            };
+            if (apiConfig.enable.has('message')) {
+                if (!apiConfig.enable.has('addEventListener')) {
+                    api.apiLog.warn('addEventListener 未启用,message 功能将无法正常使用');
+                } else {
+                    enableMessage();
+                }
+            }
             // message处理 end
         }
 
         // ==网络请求模块==
         function netApiInit() {
             api.net = {};
-            api.net.fetch = {};
-            api.net.fetch.request = api.factory('fetchRequest', { modify: 0 }, { stopPropagation: true, modify: 0 });
-            api.net.fetch.response = api.factory('fetchResponse', { modify: 0 }, { stopPropagation: true, modify: 0 });
-            api.net.fetch.response.json = api.factory('fetchResponseJson', {}, { stopPropagation: true });
-            api.net.fetch.response.text = api.factory('fetchResponseText', { modify: 0 }, { modify: 0, stopPropagation: true, });
-            api.net.fetch.response.commonTextToJsonProcess = api.factory('commonTextToJsonProcess', {}, { stopPropagation: true, });
-            api.net.fetch.response.processJson = function (json, rule, { traverse_all = false } = {}) {
-                rule && api.data.dataProcess.obj_process(json, rule, { traverse_all });
-                return true;
-            };
-
-            const origin_fetch = unsafeWindow.fetch;
-            const fake_fetch = function () {
-                const fetch_ = async function (uri, options) {
-                    async function fetch_request(response) {
-                        const originText = response.text.bind(response);
-                        const url = response.url;
-                        response.text = async function () {
-                            let text = await originText();
-                            // const start = performance.now();
-                            const save = text;
-                            try {
-                                const options = { body: uri.body_ , params: api.utils.urlParamsParse(url) };
-                                text = api.net.fetch.response.text.trigger(this, text, url, options);
-                                if (text instanceof Promise) text = await text;
-                                if (api.net.fetch.response.commonTextToJsonProcess.matchCallbackNum(this, null, url, options)) {
-                                    let json = JSON.parse(text);
-                                    api.net.fetch.response.commonTextToJsonProcess.trigger(this, json, url, options);
-                                    text = JSON.stringify(json);
-                                }
-                            } catch (error) {
-                                api.apiLog.error('fetch response text error', error);
-                                text = save;
-                            }
-                            return text;
-                        };
-                        const cloneResponse = response.clone();
-                        const originJson = response.json.bind(response);
-                        response.json = async function () {
-                            let json = await originJson();
-                            try {
-                                api.net.fetch.response.json.trigger(this, json, url, options);
-                            } catch (error) {
-                                api.apiLog.error('fetch response json error', error);
-                                json = await cloneResponse.json();
-                            }
-                            return json;
-                        };
-                        response = api.net.fetch.response.trigger(this, response, url, options);
-                        return response;
-                    }
-                    let req;
-                    try {
-                        if (!options) options = {};
-                        options.params = api.utils.urlParamsParse(uri);
-                        if (typeof uri === 'string') uri = api.net.fetch.request.trigger(this, uri, options, 'fetch');
-                        if (!(typeof uri === 'string' ? uri : uri.url)) return new Promise((resolve, reject) => reject('fetch error'));
-                        req = origin_fetch(uri, options).then(fetch_request);
-                    } catch (error) {
-                        api.apiLog.error('fetch error', error);
-                    }
-                    return req;
+            const enableFetch = () => {
+                api.net.fetch = {};
+                api.net.fetch.request = api.factory('fetchRequest', { modify: 0 }, { stopPropagation: true, modify: 0 });
+                api.net.fetch.response = api.factory('fetchResponse', { modify: 0 }, { stopPropagation: true, modify: 0 });
+                api.net.fetch.response.json = api.factory('fetchResponseJson', {}, { stopPropagation: true });
+                api.net.fetch.response.text = api.factory('fetchResponseText', { modify: 0 }, { modify: 0, stopPropagation: true, });
+                api.net.fetch.response.commonTextToJsonProcess = api.factory('commonTextToJsonProcess', {}, { stopPropagation: true, });
+                api.net.fetch.response.processJson = function (json, rule, { traverse_all = false } = {}) {
+                    rule && api.data.dataProcess.obj_process(json, rule, { traverse_all });
+                    return true;
                 };
-                return fetch_;
-            }();
-            api.utils.origin.hook('fetch', fake_fetch);
-            
-            const fakeRequest = class extends unsafeWindow.Request {
-                constructor(input, options = {}) {
-                    if (typeof input === 'string') {
-                        try {
-                            input = api.net.fetch.request.trigger(null, input, options, 'request');
-                        } catch (error) {
-                            api.apiLog.error('Request error', error);
-                        }
-                    }
-                    super(input, options);
-                    this.url_ = input;
-                    if (options && 'body' in options) this['body_'] = options['body'];
-                }
-            };
-            api.utils.origin.hook('Request', fakeRequest); 
 
-            // const OriginalRequest = unsafeWindow.Request;
-
-            // unsafeWindow.Request = new Proxy(OriginalRequest, {
-            //     construct(target, args) {
-            //         const [input, options = {}] = args;0.0 .
-            //         debugger
-            //         // 校验 signal 是否有效
-            //         if (options.signal && !(options.signal instanceof unsafeWindow.AbortSignal)) {
-            //             console.warn("Invalid AbortSignal detected, removing 'signal' from options.");
-            //             delete options.signal;
-            //         }
-
-            //         // 创建原始 Request 实例
-            //         return new target(input, options);
-            //     }
-            // });
-
-            api.net.xhr = {
-                response: {
-                    text: api.factory('xhrResponseText', { modify: 0 }, { stopPropagation: true, modify: 0 }),
-                    json: api.factory('xhrResponseJson', {}, { stopPropagation: true }),
-                },
-                request: {
-                    open: api.factory('xhrRequestOpen', { modify: [0] }, { stopPropagation: true, modify: [0] }),
-                    send: api.factory('xhrRequestSend', { modify: [0, 1] }, { stopPropagation: true, modify: [0, 1] }),
-                }
-            };
-
-            class fakeXMLHttpRequest extends unsafeWindow.XMLHttpRequest {
-                open(method, url, ...opts) {
-                    url = api.net.xhr.request.open.trigger(this, url, opts);
-                    if (url === '') return null;
-                    this.url_ = url;
-                    return super.open(method, url, ...opts);
-                }
-                send(body) {
-                    let url;
-                    [body, url] = api.net.xhr.request.send.trigger(this, body , this.url_);
-                    if (url === '') {
-                        const hook_get = (name, value) => {
-                            api.utils.defineProperty(this, name, {
-                                get: function () {
-                                    return value;
-                                }
-                            });
-                        };
-                        hook_get('readyState', 4);
-                        hook_get('statusText', 'Forbidden');
-                        hook_get('responseText', '');
-                        hook_get('response', '');
-                        hook_get('status', 403);
-                        if (typeof this.onload === 'function') {
-                            this.onload();
-                        }
-                        return;
-                    }
-                    this.body_ = body;
-                    super.send(body);
-                }
-                get xhrResponseValue() {
-                    const xhr = this;
-                    if (xhr.readyState === XMLHttpRequest.DONE && xhr.status === 200) {
-                        let result = super.response;
-                        const url = xhr.responseURL;
-                        const result_type = typeof result;
-                        if (result_type === 'string') {
-                            const options = { body: this.body_, xhr: this };
-                            try {
-                                if (api.net.xhr.response.json.matchCallbackNum(this, null, url, options)) {
-                                    try {
-                                        const json = JSON.parse(result);
-                                        api.net.xhr.response.json.trigger(this, json, url, options);
-                                        result = JSON.stringify(json);
-                                    } catch (error) {
-                                        api.apiLog.error(error);
+                const origin_fetch = unsafeWindow.fetch;
+                const fake_fetch = function () {
+                    const fetch_ = async function (uri, options) {
+                        async function fetch_request(response) {
+                            const originText = response.text.bind(response);
+                            const url = response.url;
+                            response.text = async function () {
+                                let text = await originText();
+                                // const start = performance.now();
+                                const save = text;
+                                try {
+                                    const options = { body: uri.body_, params: api.utils.urlParamsParse(url) };
+                                    text = api.net.fetch.response.text.trigger(this, text, url, options);
+                                    if (text instanceof Promise) text = await text;
+                                    if (api.net.fetch.response.commonTextToJsonProcess.matchCallbackNum(this, null, url, options)) {
+                                        let json = JSON.parse(text);
+                                        api.net.fetch.response.commonTextToJsonProcess.trigger(this, json, url, options);
+                                        text = JSON.stringify(json);
                                     }
-                                } else {
-                                    result = api.net.xhr.response.text.trigger(this, result, url, options);
+                                } catch (error) {
+                                    api.apiLog.error('fetch response text error', error);
+                                    text = save;
                                 }
+                                return text;
+                            };
+                            const cloneResponse = response.clone();
+                            const originJson = response.json.bind(response);
+                            response.json = async function () {
+                                let json = await originJson();
+                                try {
+                                    api.net.fetch.response.json.trigger(this, json, url, options);
+                                } catch (error) {
+                                    api.apiLog.error('fetch response json error', error);
+                                    json = await cloneResponse.json();
+                                }
+                                return json;
+                            };
+                            response = api.net.fetch.response.trigger(this, response, url, options);
+                            return response;
+                        }
+                        let req;
+                        try {
+                            if (!uri) {
+                                uri = unsafeWindow.location.href;
+                            }
+                            if (uri.href) {
+                                uri = uri.href;
+                            }
+                            if (!options) options = {};
+                            const { params } = api.utils.urlParamsParse(uri);
+                            options.params = params;
+                            if (typeof uri === 'string') uri = api.net.fetch.request.trigger(this, uri, options, 'fetch');
+                            if (!(typeof uri === 'string' ? uri : uri.url)) return new Promise((resolve, reject) => reject('fetch error'));
+                            if (!uri) {
+                                api.apiLog.info('fetch', uri, options, location.href);
+                            }
+                            req = origin_fetch(uri, options).then(fetch_request);
+                        } catch (error) {
+                            api.apiLog.error('fetch error', error);
+                        }
+                        return req;
+                    };
+                    return fetch_;
+                }();
+                api.utils.origin.hook('fetch', fake_fetch);
+            };
+            if (apiConfig.enable.has('fetch')) {
+                enableFetch();
+            }
+
+            const enableRequest = () => {
+                const fakeRequest = class extends unsafeWindow.Request {
+                    constructor(input, options = {}) {
+                        if (typeof input === 'string') {
+                            try {
+                                input = api.net.fetch.request.trigger(null, input, options, 'request');
                             } catch (error) {
-                                api.apiLog.error(error);
+                                api.apiLog.error('Request error', error);
                             }
                         }
-                        return result;
+                        super(input, options);
+                        this.url_ = input;
+                        if (options && 'body' in options) this['body_'] = options['body'];
                     }
-                    return super.response;
-                }
-                get responseText() {
-                    return this.xhrResponseValue;
-                }
-                get response() {
-                    return this.xhrResponseValue;
-                }
-            };
-            api.utils.origin.hook('XMLHttpRequest', fakeXMLHttpRequest);
+                };
+                api.utils.origin.hook('Request', fakeRequest);
 
-            api.dom.iframe.contentWindow.subscribe((contentWindow) => {
-                api.utils.origin.injiect(contentWindow);
-            });
-
-            const dyncLoadFlags = ['iframe', 'img', 'script', 'link', 'video', 'audio', 'source', 'object'];
-            api.net.dyncFileLoad = api.factory('dyncFileLoad', { modify: 0 }, { stopPropagation: true, modify: 0 });
-            const setterMap = {
-                iframe: {
-                    setter: Object.getOwnPropertyDescriptor(HTMLIFrameElement.prototype, 'src').set,
-                    prop: 'src'
-                },
-                img: {
-                    setter: Object.getOwnPropertyDescriptor(HTMLImageElement.prototype, 'src').set,
-                    prop: 'src'
-                },
-                script: {
-                    setter: Object.getOwnPropertyDescriptor(HTMLScriptElement.prototype, 'src').set,
-                    prop: 'src'
-                },
-                link: {
-                    setter: Object.getOwnPropertyDescriptor(HTMLLinkElement.prototype, 'href').set,
-                    prop: 'href'
-                },
-                video: {
-                    setter: Object.getOwnPropertyDescriptor(HTMLMediaElement.prototype, 'src').set,
-                    prop: 'src'
-                },
-                audio: {
-                    setter: Object.getOwnPropertyDescriptor(HTMLMediaElement.prototype, 'src').set,
-                    prop: 'src'
-                },
-                source: {
-                    setter: Object.getOwnPropertyDescriptor(HTMLSourceElement.prototype, 'src').set,
-                    prop: 'src'
-                },
-                object: {
-                    setter: Object.getOwnPropertyDescriptor(HTMLObjectElement.prototype, 'data').set,
-                    prop: 'data'
-                }
             };
-            const hookSrc = function (node) {
-                const property = setterMap[node.tagName.toLowerCase()].prop;
-                api.utils.defineProperty(node, property, {
-                    get: function () {
-                        return this.src_;
-                    },
-                    set: function (value) {
-                        let url = value;
-                        const funSet = api.net.dyncFileLoad.matchCallback(this, value, node);
-                        for (const [fun, options] of funSet) {
-                            if (options.tag === node.tagName.toLowerCase()) {
-                                const tmp = fun(url);
-                                if (tmp !== undefined) url = tmp;
-                            }
+
+            if (apiConfig.enable.has('request')) {
+                if (!apiConfig.enable.has('fetch')) {
+                    api.apiLog.warn('fetch 未启用,request 功能将无法正常使用');
+                } else {
+                    enableRequest();
+                }
+            }
+
+            const enableRequest2 = () => {
+                const OriginalRequest = unsafeWindow.Request;
+                unsafeWindow.Request = new Proxy(OriginalRequest, {
+                    construct(target, args) {
+                        let [input, options = {}] = args;
+                        if (options.signal && !(options.signal instanceof unsafeWindow.AbortSignal)) {
+                            delete options.signal;
                         }
-                        this.src_ = url;
-                        if (!url) return;
-                        setterMap[node.tagName.toLowerCase()].setter.call(node, url);
+                        input = api.net.fetch.request.trigger(null, input, options, 'request');
+                        return new target(input, options);
                     }
                 });
-                node.addEventListener('load', function (event) {
-                    const funSet = api.net.dyncFileLoad.matchCallback(this, node.src, node);
-                    for (const [_, options] of funSet) {
-                        if (options.tag === node.tagName.toLowerCase() && options.onload) {
-                            const res = options.onload.call(event, node);
+            };
+
+            if (apiConfig.enable.has('request2')) {
+                if (apiConfig.enable.has('request')) {
+                    api.apiLog.warn('request 已启用,request2 暂停设置');
+                } else {
+                    enableRequest2();
+                }
+            }
+
+
+            const enableXhr = () => {
+                api.net.xhr = {
+                    response: {
+                        text: api.factory('xhrResponseText', { modify: 0 }, { stopPropagation: true, modify: 0 }),
+                        json: api.factory('xhrResponseJson', {}, { stopPropagation: true }),
+                    },
+                    request: {
+                        open: api.factory('xhrRequestOpen', { modify: [0] }, { stopPropagation: true, modify: [0] }),
+                        send: api.factory('xhrRequestSend', { modify: [0, 1] }, { stopPropagation: true, modify: [0, 1] }),
+                    }
+                };
+
+                class fakeXMLHttpRequest extends unsafeWindow.XMLHttpRequest {
+                    open(method, url, ...opts) {
+                        url = api.net.xhr.request.open.trigger(this, url, opts);
+                        if (url === '') url = 'http://192.168.0.1:8080/';
+                        this.url_ = url;
+                        return super.open(method, url, ...opts);
+                    }
+                    send(body) {
+                        let url;
+                        [body, url] = api.net.xhr.request.send.trigger(this, body, this.url_);
+                        if (url === '') {
+                            const hook_get = (name, value) => {
+                                api.utils.defineProperty(this, name, {
+                                    get: function () {
+                                        return value;
+                                    }
+                                });
+                            };
+                            hook_get('readyState', 4);
+                            hook_get('statusText', 'Forbidden');
+                            hook_get('responseText', '');
+                            hook_get('response', '');
+                            hook_get('status', 403);
+                            if (typeof this.onload === 'function') {
+                                this.onload();
+                            }
+                            return;
+                        }
+                        this.body_ = body;
+                        super.send(body);
+                    }
+                    get xhrResponseValue() {
+                        const xhr = this;
+                        if (xhr.readyState === XMLHttpRequest.DONE && xhr.status === 200) {
+                            if (xhr.responseProcess) return xhr.responseProcess;
+                            let result = super.response;
+                            const url = xhr.responseURL;
+                            const result_type = typeof result;
+                            if (result_type === 'string') {
+                                const options = { body: this.body_, xhr: this };
+                                try {
+                                    if (api.net.xhr.response.json.matchCallbackNum(this, null, url, options)) {
+                                        try {
+                                            const json = JSON.parse(result);
+                                            api.net.xhr.response.json.trigger(this, json, url, options);
+                                            result = JSON.stringify(json);
+                                        } catch (error) {
+                                            api.apiLog.error(error);
+                                        }
+                                    } else {
+                                        result = api.net.xhr.response.text.trigger(this, result, url, options);
+                                    }
+                                } catch (error) {
+                                    api.apiLog.error(error);
+                                }
+                            }
+                            xhr.responseProcess = result;
+                            return result;
+                        }
+                        return super.response;
+                    }
+                    get responseText() {
+                        return this.xhrResponseValue;
+                    }
+                    get response() {
+                        return this.xhrResponseValue;
+                    }
+                };
+                api.utils.origin.hook('XMLHttpRequest', fakeXMLHttpRequest);
+            };
+            if (apiConfig.enable.has('xhr')) {
+                enableXhr();
+            }
+
+            const enableWebSocket = () => {
+                api.net.webSocket = {
+                    "onmessage": api.factory('WebSocketOnMessage', {}, { stopPropagation: true }),
+                    "open": api.factory('WebSocketOpen', { modify: [0] }, { modify: [0], stopPropagation: true }),
+                    "send": api.factory('WebSocketSend', { modify: [0] }, { modify: [0], stopPropagation: true }),
+                };
+                const fakeWebSocket = class extends unsafeWindow.WebSocket {
+                    constructor(url, ...opts) {
+                        url = api.net.webSocket.open.trigger(null, url, opts);
+                        super(url, ...opts);
+                        this.addEventListener('message', (event) => {
+                            const res = api.net.webSocket.onmessage.trigger(this, event, url);
                             if (!res) return;
                             event.stopPropagation();
                             event.stopImmediatePropagation();
+                        }, { capture: true, priority: true });
+                        const originEventListener = this.addEventListener;
+                        this.addEventListener = function (type, listener, options) {
+                            if (type === 'message') {
+                                if (options) {
+                                    options.capture = false;
+                                    options.priority = false;
+                                }
+                            }
+                            originEventListener.call(this, type, listener, options);
+                        };
+                        const originSend = this.send;
+                        this.send = function (data) {
+                            data = api.net.webSocket.send.trigger(this, data, url);
+                            if (data === null) return;
+                            return originSend.call(this, data);
                         };
                     }
-                }, {
-                    capture: true,
-                    priority: true,
-                    once: true,
+                };
+                api.utils.origin.hook('WebSocket', fakeWebSocket);
+            };
+
+            if (apiConfig.enable.has('webSocket')) {
+                enableWebSocket();
+            }
+
+            if (apiConfig.enable.has('iframe') && apiConfig.enable.has('createElement')) {
+                api.dom.iframe.contentWindow.subscribe((contentWindow) => {
+                    api.utils.origin.injiect(contentWindow);
                 });
-                const origin_addEventListener = node.addEventListener;
-                node.addEventListener = function (tag, fun, options) {
-                    if (tag === 'load') {
-                        if (options) {
-                            options.capture = false;
-                            options.priority = false;
-                        }
-                        origin_addEventListener.call(node, tag, fun, options);
+            }
+
+            const enableDyncFileLoad = () => {
+                const dyncLoadFlags = ['iframe', 'img', 'script', 'link', 'video', 'audio', 'source', 'object'];
+                api.net.dyncFileLoad = api.factory('dyncFileLoad', { modify: 0 }, { stopPropagation: true, modify: 0 });
+                const setterMap = {
+                    iframe: {
+                        setter: Object.getOwnPropertyDescriptor(HTMLIFrameElement.prototype, 'src').set,
+                        prop: 'src'
+                    },
+                    img: {
+                        setter: Object.getOwnPropertyDescriptor(HTMLImageElement.prototype, 'src').set,
+                        prop: 'src'
+                    },
+                    script: {
+                        setter: Object.getOwnPropertyDescriptor(HTMLScriptElement.prototype, 'src').set,
+                        prop: 'src'
+                    },
+                    link: {
+                        setter: Object.getOwnPropertyDescriptor(HTMLLinkElement.prototype, 'href').set,
+                        prop: 'href'
+                    },
+                    video: {
+                        setter: Object.getOwnPropertyDescriptor(HTMLMediaElement.prototype, 'src').set,
+                        prop: 'src'
+                    },
+                    audio: {
+                        setter: Object.getOwnPropertyDescriptor(HTMLMediaElement.prototype, 'src').set,
+                        prop: 'src'
+                    },
+                    source: {
+                        setter: Object.getOwnPropertyDescriptor(HTMLSourceElement.prototype, 'src').set,
+                        prop: 'src'
+                    },
+                    object: {
+                        setter: Object.getOwnPropertyDescriptor(HTMLObjectElement.prototype, 'data').set,
+                        prop: 'data'
                     }
                 };
-            };
-            if (apiConfig.disable.includes('dyncFileLoad')) {
-                api.apiLog.info('dyncFileLoad 已禁用');
-                return;
-            }
-            api.dom.createElement.subscribe((node) => {
-                const funSet = api.net.dyncFileLoad.manualTrigger(node);
-                for (const [_, options] of funSet) {
-                    if (options.tag === node.tagName.toLowerCase()) {
-                        hookSrc(node);
-                        return;
+                const hookSrc = function (node) {
+                    const property = setterMap[node.tagName.toLowerCase()].prop;
+                    api.utils.defineProperty(node, property, {
+                        get: function () {
+                            return this.src_;
+                        },
+                        set: function (value) {
+                            let url = value;
+                            const funSet = api.net.dyncFileLoad.matchCallback(this, value, node);
+                            for (const [fun, options] of funSet) {
+                                if (options.tag === node.tagName.toLowerCase()) {
+                                    const tmp = fun(url);
+                                    if (tmp !== undefined) url = tmp;
+                                }
+                            }
+                            this.src_ = url;
+                            if (!url) return;
+                            setterMap[node.tagName.toLowerCase()].setter.call(node, url);
+                        }
+                    });
+                    const originSet = node.setAttribute;
+                    node.setAttribute = function (name, value) {
+                        if (name === property) {
+                            node[property] = value;
+                            return;
+                        }
+                        originSet.call(this, name, value);
+                    };
+                    node.addEventListener('load', function (event) {
+                        const funSet = api.net.dyncFileLoad.matchCallback(this, node.src, node);
+                        for (const [_, options] of funSet) {
+                            if (options.tag === node.tagName.toLowerCase() && options.onload) {
+                                const res = options.onload.call(event, node);
+                                if (!res) return;
+                                event.stopPropagation();
+                                event.stopImmediatePropagation();
+                            };
+                        }
+                    }, {
+                        capture: true,
+                        priority: true,
+                        once: true,
+                    });
+                    const origin_addEventListener = node.addEventListener;
+                    node.addEventListener = function (tag, fun, options) {
+                        if (tag === 'load') {
+                            if (options) {
+                                options.capture = false;
+                                options.priority = false;
+                            }
+                            origin_addEventListener.call(node, tag, fun, options);
+                        }
+                    };
+                };
+                api.dom.createElement.subscribe((node) => {
+                    const funSet = api.net.dyncFileLoad.manualTrigger(node);
+                    for (const [_, options] of funSet) {
+                        if (options.tag === node.tagName.toLowerCase()) {
+                            hookSrc(node);
+                            return;
+                        }
                     }
+                }, { condition: (_, tag) => dyncLoadFlags.includes(tag) });
+            };
+            if (apiConfig.enable.has('dyncFileLoad')) {
+                if (!apiConfig.enable.has('createElement')) {
+                    api.apiLog.warn('createElement 未启用,dyncFileLoad 功能将无法正常使用');
+                } else {
+                    enableDyncFileLoad();
                 }
-            }, { condition: (_, tag) => dyncLoadFlags.includes(tag) });
+            }
         }
 
         // ==动画效果模块==
         function animateApiInit() {
             api.animate = {
-                backgroundFlash: function (decNode, options = {}) {
+                flash: function (decNode, options = {}) {
                     const {
                         frequency = 100,
                         isFront = false,
@@ -1153,7 +1500,7 @@
                         close: closeAnimation
                     };
                 },
-                changeColor: function (decNode, options = {}) {
+                frontColor: function (decNode, options = {}) {
                     const {
                         color = 'yellow',
                         isFront = false,
@@ -1169,7 +1516,7 @@
                         decNode.style[decProName] = originColor;
                     };
                 },
-                headerScan: function (decNode, color = 'yellow') {
+                scanLine: function (decNode, color = 'yellow') {
                     let scanLine;
                     let styleElement;
                     const startAnimation = () => {
@@ -1214,7 +1561,30 @@
 
         // ==数据处理模块==
         function dataApiInit() {
-            // ... 数据处理类实例 ...
+            // ... 数据处理类实例 ..
+            const enableJson = () => {
+                api.data.json = {
+                    parase: api.factory('jsonParase', { modify: 0 }, { stopPropagation: true, modify: 0 }),
+                    stringify: api.factory('jsonStringify', {}, { stopPropagation: true }),
+                };
+                const originParse = unsafeWindow.JSON.parse;
+                const originStringify = unsafeWindow.JSON.stringify;
+                const fakeParse = function (text) {
+                    const res = api.data.json.parase.trigger(null, text);
+                    if (res) text = res;
+                    return originParse(text);
+                };
+
+                const fakeStringify = function (obj) {
+                    api.data.json.stringify.trigger(null, obj);
+                    return originStringify(obj);
+                };
+                api.utils.origin.hook('JSON.parse', fakeParse);
+                api.utils.origin.hook('JSON.stringify', fakeStringify);
+            };
+
+            if (apiConfig.enable.has('json')) enableJson();
+
             class DATA_PROCESS {
                 constructor() {
                     this.obj_filter;
@@ -2047,11 +2417,11 @@
         netApiInit();
         animateApiInit();
         // 返回API对象
-        unsafeWindow.debug_ = api.utils.debug;
+        if (apiConfig.dev) {
+            unsafeWindow.debug_ = api.utils.debugHelper;
+        }
         return api;
     };
-    return {
-        version: version,
-        createApi: QuicklyModel
-    };
+
+    unsafeWindow.QuicklyModel = QuicklyModel;
 })();
