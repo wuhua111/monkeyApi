@@ -10,7 +10,7 @@
 // @grant        GM_addElement
 // @grant        GM_setValue
 // @grant        GM_getValue
-// @require      file:///G:/vscode/chrome_extend/monkeyApi/quicklymodel.module.1.0.4.js?12320
+// @require      file:///G:/vscode/chrome_extend/monkeyApi/quicklymodel.module.1.0.4.js?12328
 // @noframes
 // @run-at       document-start
 // @license      MIT

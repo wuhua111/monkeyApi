@@ -39,6 +39,7 @@ class QuicklyModelCore {
         // canvas: Canvas拦截
         // random: Math.random拦截
         // setAttribute: 拦截setAttribute 返回false 拦截
+        // webpack: webpack拦截 需要config里通过webpack属性传入一个webpack具体名称 
         const defaultEnable = new Set(['createElement', 'iframe', 'fetch', 'xhr', 'request']);
 
         // 处理enable选项
@@ -396,12 +397,13 @@ class UtilsModule extends BaseModule {
                     showTrace: true, // 是否显示错误追踪
                     maxLogLength: 1000, // 单条日志最大长度
                     showInConsole: true, // 是否在控制台显示
+                    showLevel: 1, // 是否显示级别
                     maxLogStorage: 1000, // 最大存储日志条数
                     levels: {
-                        DEBUG: { name: 'DEBUG', color: '#7f8c8d', show: true },
-                        INFO: { name: 'INFO', color: '#2ecc71', show: true },
-                        WARN: { name: 'WARN', color: '#f1c40f', show: true },
-                        ERROR: { name: 'ERROR', color: '#e74c3c', show: true }
+                        DEBUG: { name: 'DEBUG', color: '#7f8c8d', value: 1 },
+                        INFO: { name: 'INFO', color: '#2ecc71', value: 2 },
+                        WARN: { name: 'WARN', color: '#f1c40f', value: 3 },
+                        ERROR: { name: 'ERROR', color: '#e74c3c', value: 4 }
                     },
                     ...otherOptions
                 };
@@ -413,7 +415,7 @@ class UtilsModule extends BaseModule {
                 this.logStorage = [];
             }
             _log(level, ...args) {
-                if (!this.options.enabled || !this.options.levels[level].show) return;
+                if (this.options.levels[level].value < this.options.showLevel) return;
                 // 处理日志内容
                 let logContent = args.map(arg => {
                     if (arg instanceof Error) {
@@ -534,7 +536,7 @@ class UtilsModule extends BaseModule {
 
         this.apiLog = new this.Logger({
             moduleName: 'API',
-            showInConsole: this.config.dev
+            showLevel: this.config.dev ? 1 : 3
         });
     }
 
@@ -831,7 +833,7 @@ class DOMModule extends BaseModule {
         const localContext = this;
         this.setAttribute = this.factory('setAttribute', { modify: 0 }, { stopPropagation: true, modify: 0 });
         const originSetattribute = unsafeWindow.Element.prototype.setAttribute;
-        const fakeSetattribute   = function (name, value) {
+        const fakeSetattribute = function (name, value) {
             value = localContext.setAttribute.trigger(this, value, name);
             if (value === false) return;
             originSetattribute.call(this, name, value);
@@ -2794,6 +2796,14 @@ class OtherModule extends BaseModule {
         if (this.isEnabled('random')) {
             this.initRandom();
         }
+
+        if (this.isEnabled('webpack')) {
+            if (this.config.webpack) {
+                this.initWebpack();
+            } else {
+                this.error('webpack拦截需要传入一个webpack具体名称');
+            }
+        }
     }
 
     initPromise() {
@@ -2828,6 +2838,40 @@ class OtherModule extends BaseModule {
             return result || originRandom.apply(this);
         };
         this.utils.origin.hook('Math.random', fakeRandom);
+    }
+
+    /**
+     * 
+     * 
+     * @example
+     * 
+     * 初始化
+     * options = {'webpack': 'webpackJsonp' , enable:['webpack'] }  
+     * 使用
+     * this.webpack.subscribe((moduleId, moduleContent) => {
+     *   console.log('加载模块:', moduleId);
+     * });
+     */
+    initWebpack() {
+        this.webpack = this.factory('webpack', {}, {});
+        let webpack = null;
+        const localContext = this;
+        const hookPush = () => {
+            const originPush = webpack.push;
+            webpack.push = function (chunk) {
+                localContext.webpack.trigger(null, ...chunk);
+                originPush.call(this, chunk);
+            };
+        };
+        this.utils.defineProperty(unsafeWindow, this.config.webpack, {
+            get: function () {
+                return webpack;
+            },
+            set: function (value) {
+                webpack = value;
+                if (typeof webpack === 'object') hookPush();
+            }
+        });
     }
 
 }
