@@ -1,3 +1,9 @@
+/**
+ * QuicklyModelCore 类
+ * 版本: 1.0.4
+ * 作者: hua
+ */
+
 class QuicklyModelCore {
     constructor(options = {}) {
         this.version = '1.0.4';
@@ -32,7 +38,7 @@ class QuicklyModelCore {
         // promise: Promise拦截
         // canvas: Canvas拦截
         // random: Math.random拦截
-
+        // setAttribute: 拦截setAttribute 返回false 拦截
         const defaultEnable = new Set(['createElement', 'iframe', 'fetch', 'xhr', 'request']);
 
         // 处理enable选项
@@ -66,6 +72,7 @@ class QuicklyModelCore {
         this.animate = new AnimateModule(this);
         this.data = new DataModule(this);
         this.date = new DateModule(this);
+        this.other = new OtherModule(this);
 
         // 开发模式下添加调试工具
         if (this.config.dev) {
@@ -93,15 +100,15 @@ class BaseModule {
 
     // 日志记录
     info(...args) {
-        this.utils.apiLog.info(...args);
+        this.core.utils.apiLog.info(...args);
     }
 
     error(...args) {
-        this.utils.apiLog.error(...args);
+        this.core.utils.apiLog.error(...args);
     }
 
     warn(...args) {
-        this.utils.apiLog.warn(...args);
+        this.core.utils.apiLog.warn(...args);
     }
 }
 
@@ -697,6 +704,10 @@ class UtilsModule extends BaseModule {
         Object.defineProperty(obj, property, descriptor);
     }
 
+    hookGlobalObjectPrototypeName(propertyName, descriptor) {
+        this.defineProperty(Object.prototype, propertyName, descriptor);
+    }
+
     randomColor() {
         const letters = '0123456789ABCDEF';
         let color = '#';
@@ -788,6 +799,10 @@ class DOMModule extends BaseModule {
             this.initIframe();
         }
 
+        if (this.isEnabled('setAttribute')) {
+            this.initSetAttribute();
+        }
+
         this.initWaitElement();
     }
 
@@ -810,6 +825,18 @@ class DOMModule extends BaseModule {
         };
 
         this.utils.origin.hook('document.createElement', fakeCreateElement);
+    }
+
+    initSetAttribute() {
+        const localContext = this;
+        this.setAttribute = this.factory('setAttribute', { modify: 0 }, { stopPropagation: true, modify: 0 });
+        const originSetattribute = unsafeWindow.Element.prototype.setAttribute;
+        const fakeSetattribute   = function (name, value) {
+            value = localContext.setAttribute.trigger(this, value, name);
+            if (value === false) return;
+            originSetattribute.call(this, name, value);
+        };
+        this.utils.origin.hook('Element.prototype.setAttribute', fakeSetattribute);
     }
 
     initIframe() {
@@ -1222,7 +1249,7 @@ class DateModule extends BaseModule {
         this.date = this.factory('date', {}, { stopPropagation: true });
         class fakeDate extends Date {
             constructor(...args) {
-                localContext.date.trigger(this, 'constructor', args);
+                localContext.date.trigger(null, 'constructor', args);
                 super(...args);
             }
             now() {
@@ -1670,7 +1697,7 @@ class NetworkModule extends BaseModule {
         const fakeWorker = class extends unsafeWindow.Worker {
             constructor(scriptURL, options = {}) {
                 // 处理脚本URL
-                scriptURL = localContext.worker.create.trigger(this, scriptURL, options);
+                scriptURL = localContext.worker.create.trigger(null, scriptURL, options);
                 super(scriptURL, options);
 
                 // 处理消息

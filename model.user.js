@@ -19,12 +19,13 @@
 // @require      https://gcore.jsdelivr.net/gh/wuhua111/monkeyApi@main/quicklymodel.module.1.0.3.js
 
 
-const api = new QuicklyModelCore({
-    dev: true,
-    // disable: [],
-    // enable: ['json', 'dyncFileLoad', 'webSocket', 'message', 'addEventListener']
-});
-const logger = new api.utils.Logger({ moduleName: 'modelTest', showInConsole: true });
+// const api = new QuicklyModelCore({
+//     dev: true,
+//     disable: [],
+//     enable: ['json', 'dyncFileLoad', 'webSocket', 'message', 'addEventListener']
+// });
+const api = new QuicklyModelCore();
+const logger = new api.utils.Logger({ moduleName: 'modelTest' });
 const $ = api.dom.query.$;
 const $$ = api.dom.query.$$;
 
