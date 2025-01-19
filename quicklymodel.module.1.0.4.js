@@ -40,6 +40,7 @@ class QuicklyModelCore {
         // random: Math.random拦截
         // setAttribute: 拦截setAttribute 返回false 拦截
         // webpack: webpack拦截 需要config里通过webpack属性传入一个webpack具体名称 
+        // hls: hls拦截
         const defaultEnable = new Set(['createElement', 'iframe', 'fetch', 'xhr', 'request']);
 
         // 处理enable选项
@@ -74,6 +75,7 @@ class QuicklyModelCore {
         this.data = new DataModule(this);
         this.date = new DateModule(this);
         this.other = new OtherModule(this);
+        this.video = new VideoModule(this);
 
         // 开发模式下添加调试工具
         if (this.config.dev) {
@@ -299,6 +301,7 @@ class UtilsModule extends BaseModule {
                 },
                 trigger: function (name, context, ...data) {
                     if (typeof name !== 'string') throw new TypeError('Name must be a string');
+                    let executeRes;
                     const globalModifyReturn = () => {
                         const globalModify = this.globalOptionsMap.get(name).modify;
                         if (globalModify.length) {
@@ -327,14 +330,14 @@ class UtilsModule extends BaseModule {
                         if (options.once) {
                             decMap.delete(callback);
                         }
-                        const res = callback(context, data);
-                        const boolRes = (res === undefined || res === null) ? false : true;
+                        executeRes = callback(context, data);
+                        const boolRes = (executeRes === undefined || executeRes === null) ? false : true;
                         if (options.stopPropagation && (options.async || boolRes)) break;
                     }
                     if (decMap.size === 0) {
                         this.subscribeMap.delete(name);
                     }
-                    return globalModifyReturn();
+                    return globalModifyReturn() || executeRes;
                 },
             };
             return (name, globalOptions = {}, commonOptions = {}) => {
@@ -609,6 +612,7 @@ class UtilsModule extends BaseModule {
                     });
                 }
                 const originFun = dec[lastProp];
+                let unHookFun = null;
                 if (typeof originFun === 'function' && !localContext.type.isNative(lastProp, originFun)) {
                     localContext.warn(`${lastProp} have been modified`);
                 }
@@ -621,7 +625,8 @@ class UtilsModule extends BaseModule {
                 }
                 this.hooked.set(prop, {
                     originFun,
-                    fakeFun: value
+                    fakeFun: value,
+                    unHookFun
                 });
             },
             hooked: new Map(),
@@ -629,6 +634,16 @@ class UtilsModule extends BaseModule {
                 for (const [prop, { fakeFun }] of this.hooked) {
                     this.hook(prop, fakeFun, global);
                 }
+            },
+            unHook: function (prop) {
+                if (!this.hooked.has(prop)) return;
+                const { unHookFun } = this.hooked.get(prop);
+                if (!unHookFun) return;
+                unHookFun();
+                this.hooked.delete(prop);
+            },
+            getOrigin: function (prop) {
+                return this.hooked.get(prop)?.originFun;
             }
         };
     }
@@ -681,6 +696,182 @@ class UtilsModule extends BaseModule {
                     }
                 });
                 this.console.groupEnd();
+            },
+            detectVideoPlayers: () => {
+                const playerFeatures = {
+                    // Video.js 特征
+                    'Video.js': {
+                        objects: ['videojs', 'VideoJs', 'VIDEOJS'],
+                        classes: ['video-js', 'vjs-tech', 'vjs-control-bar', 'vjs-big-play-button'],
+                        attributes: ['data-setup'],
+                        elements: ['video-js']
+                    },
+
+                    // Plyr 特征
+                    'Plyr': {
+                        objects: ['Plyr'],
+                        classes: ['plyr', 'plyr__video-wrapper', 'plyr__controls', 'plyr--video', 'plyr--ready'],
+                        attributes: ['data-plyr', 'data-plyr-provider', 'data-plyr-embed-id']
+                    },
+
+                    // DPlayer 特征
+                    'DPlayer': {
+                        objects: ['DPlayer'],
+                        classes: ['dplayer', 'dplayer-video-wrap', 'dplayer-controller', 'dplayer-mask', 'dplayer-video-current'],
+                        attributes: ['data-dplayer']
+                    },
+
+                    // Artplayer 特征
+                    'Artplayer': {
+                        objects: ['Artplayer'],
+                        classes: ['artplayer-app', 'art-video-player', 'art-controls', 'art-mask'],
+                        attributes: ['data-artplayer']
+                    },
+
+                    // MediaElement 特征
+                    'MediaElement': {
+                        objects: ['MediaElement', 'MediaElementPlayer'],
+                        classes: ['mejs__container', 'mejs__video', 'mejs__controls', 'mejs__time'],
+                        attributes: ['data-mejsoptions']
+                    },
+
+                    // Shaka Player 特征
+                    'Shaka Player': {
+                        objects: ['shaka', 'ShakaPlayer'],
+                        elements: ['shaka-video'],
+                        attributes: ['data-shaka-player']
+                    },
+
+                    // Clappr 特征
+                    'Clappr': {
+                        objects: ['Clappr', 'ClapprPlayer'],
+                        classes: ['clappr-player', 'clappr-video', 'player-poster'],
+                        attributes: ['data-clappr']
+                    },
+
+                    // Flowplayer 特征
+                    'Flowplayer': {
+                        objects: ['flowplayer'],
+                        classes: ['flowplayer', 'fp-player', 'fp-engine', 'fp-ui'],
+                        attributes: ['data-flowplayer']
+                    },
+
+                    // OpenPlayer 特征
+                    'OpenPlayer': {
+                        objects: ['OpenPlayer'],
+                        classes: ['op-player', 'op-controls', 'op-player__video'],
+                        attributes: ['data-op-player']
+                    },
+
+                    // Chimee 特征
+                    'Chimee': {
+                        objects: ['Chimee', 'ChimeePlayer'],
+                        classes: ['chimee-container', 'chimee-video-wrap'],
+                        attributes: ['data-chimee']
+                    },
+
+                    // Griffith 特征
+                    'Griffith': {
+                        objects: ['Griffith'],
+                        classes: ['griffith-root', 'griffith-video', 'griffith-controls'],
+                        attributes: ['data-griffith']
+                    },
+
+                    // Hls.js 特征
+                    'Hls.js': {
+                        objects: ['Hls'],
+                        attributes: ['data-hls', 'data-hls-url']
+                    },
+
+                    // Dash.js 特征
+                    'Dash.js': {
+                        objects: ['dashjs', 'MediaPlayer'],
+                        attributes: ['data-dashjs']
+                    }
+                };
+                const localContext = this;
+
+                function detectFeatures() {
+                    const results = {};
+
+                    for (const [player, features] of Object.entries(playerFeatures)) {
+                        let score = 0;
+                        const detected = {
+                            name: player,
+                            features: []
+                        };
+
+                        // 检测全局对象
+                        if (features.objects) {
+                            for (const obj of features.objects) {
+                                const exists = obj.split('.').reduce((obj, prop) => obj && obj[prop], window);
+                                if (exists) {
+                                    score += 3;
+                                    detected.features.push(`全局对象: ${obj}`);
+                                }
+                            }
+                        }
+
+                        // 检测类名
+                        if (features.classes) {
+                            for (const className of features.classes) {
+                                if (document.getElementsByClassName(className).length > 0) {
+                                    score += 2;
+                                    detected.features.push(`类名: ${className}`);
+                                }
+                            }
+                        }
+
+                        // 检测属性
+                        if (features.attributes) {
+                            for (const attr of features.attributes) {
+                                if (document.querySelector(`[${attr}]`)) {
+                                    score += 2;
+                                    detected.features.push(`属性: ${attr}`);
+                                }
+                            }
+                        }
+
+                        // 检测元素
+                        if (features.elements) {
+                            for (const element of features.elements) {
+                                if (document.getElementsByTagName(element).length > 0) {
+                                    score += 2;
+                                    detected.features.push(`元素: ${element}`);
+                                }
+                            }
+                        }
+
+                        if (score > 0) {
+                            detected.score = score;
+                            results[player] = detected;
+                        }
+                    }
+
+                    return results;
+                }
+
+                // 格式化输出结果
+                function formatResults(results) {
+                    localContext.console.group('视频播放器检测结果');
+
+                    const sortedResults = Object.values(results)
+                        .sort((a, b) => b.score - a.score);
+
+                    if (sortedResults.length === 0) {
+                        return localContext.info('未检测到已知的视频播放器');
+                    } else {
+                        sortedResults.forEach(result => {
+                            localContext.console.group(`${result.name} (匹配度: ${result.score})`);
+                            localContext.console.log('检测到的特征:', result.features);
+                            localContext.console.groupEnd();
+                        });
+                    }
+
+                    localContext.console.groupEnd();
+                }
+
+                return formatResults(detectFeatures());
             }
         };
     }
@@ -717,6 +908,54 @@ class UtilsModule extends BaseModule {
             color += letters[Math.floor(Math.random() * 16)];
         }
         return color;
+    }
+
+    /**
+     * 请求在浏览器空闲时间执行一个回调函数。
+     *
+     * @param {Function} callback - 在空闲时调用的回调函数。
+     * @param {Object} [options={}] - 配置选项。
+     * @param {Array} [options.args=[]] - 传递给回调函数的参数。
+     * @param {number} [options.timeout=-1] - 任务的最大等待时间（毫秒）。
+     * @param {number} [options.minRemaining=0] - 回调执行所需的最小剩余时间（毫秒）。
+     * @returns {Function} 取消回调请求的函数。
+     */
+    requestIdleCallback(callback, options = {}) {
+        let cancel = null;
+        const { args: callbackArgs = [], timeout = -1, minRemaining = 0 } = options;
+        let startTime = null;
+        const callbackOptions = {};
+        if (timeout !== -1) callbackOptions.timeout = timeout;
+        const timeoutSet = timeout > 0;
+        const originDate = this.origin.getOrigin('Date');
+        if (timeoutSet) startTime = originDate.now();
+
+        const realCallback = (deadline) => {
+            const args = [...callbackArgs, deadline];
+            if (deadline.timeRemaining() >= minRemaining) {
+                callback(...args);
+            } else {
+                if (timeoutSet) {
+                    const remain = callbackOptions.timeout - (originDate.now() - startTime);
+                    if (remain > 0) {
+                        callbackOptions.timeout = remain;
+                    } else {
+                        callback(...args);
+                        return;
+                    }
+                }
+                cancel = unsafeWindow.requestIdleCallback(realCallback, callbackOptions);
+            }
+        };
+
+        cancel = unsafeWindow.requestIdleCallback(realCallback, callbackOptions);
+
+        return () => {
+            if (cancel) {
+                unsafeWindow.cancelIdleCallback(cancel);
+                cancel = null;
+            }
+        };
     }
 
     initCookie() {
@@ -822,7 +1061,8 @@ class DOMModule extends BaseModule {
         const origin_createElement = unsafeWindow.document.createElement;
         const fakeCreateElement = function (tag, options) {
             let node = origin_createElement.call(this, tag, options);
-            localContext.createElement.trigger(this, node, tag, options);
+            const res = localContext.createElement.trigger(this, node, tag, options);
+            if (res === false) return;
             return node;
         };
 
@@ -1311,12 +1551,17 @@ class NetworkModule extends BaseModule {
             this.initWebSocket();
         }
 
+        if (this.isEnabled('worker')) {
+            this.initWorker();
+        }
+
         if (this.isEnabled('dyncFileLoad')) {
             if (!this.isEnabled('createElement')) {
                 this.error('open hook dyncFileLoad need createElement');
                 return;
             }
-            this.initDyncFileLoad();
+            this.
+            initDyncFileLoad();
         }
 
         // iframe contentWindow hook
@@ -2854,12 +3099,28 @@ class OtherModule extends BaseModule {
      */
     initWebpack() {
         this.webpack = this.factory('webpack', {}, {});
+
         let webpack = null;
         const localContext = this;
         const hookPush = () => {
             const originPush = webpack.push;
             webpack.push = function (chunk) {
-                localContext.webpack.trigger(null, ...chunk);
+                const utils = {
+                    modifyFun: function (funName, reg, replace) {
+                        const modules = chunk[1];
+                        if (!(funName in modules)) return localContext.warn('webpack.push 修改函数失败，函数不存在--->' + funName), false;
+                        try {
+                            let funStr = modules[funName].toString();
+                            funStr = funStr.replace(reg, replace);
+                            modules[funName] = new Function('return ' + funStr)();
+                            return true;
+                        } catch (error) {
+                            localContext.error(`webpack.push 修改${funName}函数失败，错误信息：${error}`);
+                            return false;
+                        }
+                    }
+                };
+                localContext.webpack.trigger(utils, ...chunk);
                 originPush.call(this, chunk);
             };
         };
@@ -2874,6 +3135,58 @@ class OtherModule extends BaseModule {
         });
     }
 
+}
+
+class VideoModule extends BaseModule {
+    constructor(core) {
+        super(core);
+
+        if (this.isEnabled('hls')) {
+            this.initHls();
+        }
+    }
+
+    initHls() {
+        const localContext = this;
+        this.hls = {};
+        this.hls.oncreate = this.factory('oncreate', {}, {});
+        this.hls.loadSource = this.factory('loadSource', { modify: 0 }, { modify: 0, stopPropagation: true });
+        this.hls.manifestParsed = this.factory('manifestParsed', {}, {});
+        let Hls_ = null;
+        const hookHlsInstance = function (instance) {
+            localContext.hls.oncreate.trigger(this, instance);
+            const originLoadSource = instance.loadSource;
+            instance.loadSource = function (url) {
+                url = localContext.hls.loadSource.trigger(this, url);
+                return originLoadSource.call(this, url);
+            };
+            instance.on(Hls_.Events.MANIFEST_PARSED, function (event, data) {
+                localContext.hls.manifestParsed.trigger(this, event, data);
+            });
+
+        };
+        this.utils.defineProperty(unsafeWindow, 'Hls', {
+            get: function () {
+                return Hls_;
+            },
+            set: function (value) {
+                if (!value) return;
+                const OriginalHls = value;
+                value = new Proxy(OriginalHls, {
+                    apply(target, thisArg, args) {
+                        const instance = target.apply(thisArg, args);
+                        return instance;
+                    },
+                    construct(target, args) {
+                        const instance = new target(...args);
+                        hookHlsInstance(instance);
+                        return instance;
+                    }
+                });
+                Hls_ = value;
+            }
+        });
+    }
 }
 
 if (unsafeWindow.inject_xxxx) return;
