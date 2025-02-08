@@ -43,6 +43,12 @@ class QuicklyModelCore {
         // hls: hls拦截
         const defaultEnable = new Set(['createElement', 'iframe', 'fetch', 'xhr', 'request']);
 
+        // 禁用默认
+        if (options.disableDefault) {
+            defaultEnable.clear();
+            delete options.disableDefault;
+        }
+
         // 处理enable选项
         if (options.enable) {
             options.enable.forEach((item) => defaultEnable.add(item));
@@ -128,6 +134,7 @@ class UtilsModule extends BaseModule {
         this.initType();
         this.initOrigin();
         this.initDebugHelper();
+
         this.initCookie();
         this.initUrl();
 
@@ -1218,7 +1225,9 @@ class EventModule extends BaseModule {
 
         if (this.isEnabled('addEventListener')) {
             this.initEventListener();
+            this.info('EventModule addEventListener 初始化成功');
         }
+
 
         if (this.isEnabled('message')) {
             if (!this.isEnabled('addEventListener')) {
@@ -1226,14 +1235,18 @@ class EventModule extends BaseModule {
                 return;
             }
             this.initMessage();
+            this.info('EventModule message 初始化成功');
         }
+
 
         if (this.isEnabled('open')) {
             this.initWinOpen();
+            this.info('EventModule open 初始化成功');
         }
 
         if (this.isEnabled('eval')) {
             this.initEval();
+            this.info('EventModule eval 初始化成功');
         }
 
     }
@@ -1475,14 +1488,17 @@ class DateModule extends BaseModule {
 
         if (this.isEnabled('date')) {
             this.initDate();
+            this.info('DateModule date 初始化成功');
         }
 
         if (this.isEnabled('setTimeout')) {
             this.initSetTimeout();
+            this.info('DateModule setTimeout 初始化成功');
         }
 
         if (this.isEnabled('setInterval')) {
             this.initSetInterval();
+            this.info('DateModule setInterval 初始化成功');
         }
     }
 
@@ -1541,18 +1557,22 @@ class NetworkModule extends BaseModule {
             } else if (this.isEnabled('request2')) {
                 this.initRequest2();
             }
+            this.info('NetworkModule fetch 初始化成功');
         }
 
         if (this.isEnabled('xhr')) {
             this.initXHR();
+            this.info('NetworkModule xhr 初始化成功');
         }
 
         if (this.isEnabled('webSocket')) {
             this.initWebSocket();
+            this.info('NetworkModule webSocket 初始化成功');
         }
 
         if (this.isEnabled('worker')) {
             this.initWorker();
+            this.info('NetworkModule worker 初始化成功');
         }
 
         if (this.isEnabled('dyncFileLoad')) {
@@ -1560,9 +1580,10 @@ class NetworkModule extends BaseModule {
                 this.error('open hook dyncFileLoad need createElement');
                 return;
             }
-            this.
-            initDyncFileLoad();
+            this.initDyncFileLoad();
+            this.info('NetworkModule dyncFileLoad 初始化成功');
         }
+
 
         // iframe contentWindow hook
         if (this.isEnabled('iframe')) {
@@ -1573,6 +1594,7 @@ class NetworkModule extends BaseModule {
             this.core.dom.iframe.contentWindow.subscribe((contentWindow) => {
                 this.utils.origin.injiect(contentWindow);
             });
+            this.info('NetworkModule iframe 初始化成功');
         }
     }
 
@@ -2111,15 +2133,20 @@ class DataModule extends BaseModule {
 
         if (this.isEnabled('json')) {
             this.initJson();
+            this.info('DataModule json 初始化成功');
         }
 
         if (this.isEnabled('localStorage')) {
             this.initLocalStorage();
+            this.info('DataModule localStorage 初始化成功');
         }
+
 
         if (this.isEnabled('sessionStorage')) {
             this.initSessionStorage();
+            this.info('DataModule sessionStorage 初始化成功');
         }
+
 
         this.initDataProcess();
     }
@@ -3032,15 +3059,21 @@ class OtherModule extends BaseModule {
 
         if (this.isEnabled('promise')) {
             this.initPromise();
+            this.info('OtherModule promise 初始化成功');
         }
+
 
         if (this.isEnabled('canvas')) {
             this.initCanvas();
+            this.info('OtherModule canvas 初始化成功');
         }
+
 
         if (this.isEnabled('random')) {
             this.initRandom();
+            this.info('OtherModule random 初始化成功');
         }
+
 
         if (this.isEnabled('webpack')) {
             if (this.config.webpack) {
@@ -3048,6 +3081,7 @@ class OtherModule extends BaseModule {
             } else {
                 this.error('webpack拦截需要传入一个webpack具体名称');
             }
+            this.info('OtherModule webpack 初始化成功');
         }
     }
 
@@ -3099,11 +3133,13 @@ class OtherModule extends BaseModule {
      */
     initWebpack() {
         this.webpack = this.factory('webpack', {}, {});
-
         let webpack = null;
         const localContext = this;
+        let modifiedWebpackPush = false;
         const hookPush = () => {
+            if (modifiedWebpackPush) return;
             const originPush = webpack.push;
+            modifiedWebpackPush = true;
             webpack.push = function (chunk) {
                 const utils = {
                     modifyFun: function (funName, reg, replace) {
@@ -3111,9 +3147,12 @@ class OtherModule extends BaseModule {
                         if (!(funName in modules)) return localContext.warn('webpack.push 修改函数失败，函数不存在--->' + funName), false;
                         try {
                             let funStr = modules[funName].toString();
-                            funStr = funStr.replace(reg, replace);
-                            modules[funName] = new Function('return ' + funStr)();
-                            return true;
+                            if (funStr.search(reg) > -1) {
+                                funStr = funStr.replace(reg, replace);
+                                modules[funName] = new Function('return ' + funStr)();
+                                return true;
+                            }
+                            throw new Error(`字符串${reg}未找到`);
                         } catch (error) {
                             localContext.error(`webpack.push 修改${funName}函数失败，错误信息：${error}`);
                             return false;
@@ -3130,8 +3169,9 @@ class OtherModule extends BaseModule {
             },
             set: function (value) {
                 webpack = value;
-                if (typeof webpack === 'object') hookPush();
+                if (typeof webpack === 'object' && Object.getOwnPropertyNames(webpack).includes('push')) hookPush();
             }
+
         });
     }
 
@@ -3143,7 +3183,9 @@ class VideoModule extends BaseModule {
 
         if (this.isEnabled('hls')) {
             this.initHls();
+            this.info('VideoModule hls 初始化成功');
         }
+
     }
 
     initHls() {
