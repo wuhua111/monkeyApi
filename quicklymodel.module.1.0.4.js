@@ -1187,27 +1187,44 @@ class DOMModule extends BaseModule {
         /**
          * 等待元素渲染完成
          * @param {Node} decNode 要观察的节点
-         * @param {string} expression 匹配表达式
+         * @param {string|Object} expression 匹配表达式 或者 匹配表达式对象 {selector:'',id:'',name:'',tag:'',class:"class1 class2"}
          * @param {Object} options 配置选项
          * @param {number} options.timeout 超时时间,默认10000ms
          * @param {string} options.type 匹配类型,'selector'/'class'/'id'/'name'/'tag',默认'selector'
          * @returns {Promise<Node>} 返回找到的元素节点
          */
         this.waitForRender = (decNode, expression, options = {}) => {
-            const { timeout = 10000, type = 'selector' } = options;
-
-            if (!['selector', 'class', 'id', 'name', 'tag'].includes(type)) {
+            let { timeout = 10000, type = 'selector' } = options;
+            type = typeof expression === 'object' ? 'object' : type;
+            if (!['selector', 'class', 'id', 'name', 'tag', 'object'].includes(type)) {
                 return Promise.reject('waitForRender type error');
             }
+            if (type !== 'object') {
+                const temp = {};
+                temp[type] = expression;
+                expression = temp;
+            }
+            if ('class' in expression && typeof expression['class'] === 'string') expression['class'] = expression['class'].split(' ');
 
+            const conditionCheck = (node) => {
+                const checkOne = (type_, value) => {
+                    if (type_ === 'selector') return node.querySelector(value);
+                    if (type_ === 'id') return node.id === value;
+                    if (type_ === 'name') return node.name === value;
+                    if (type_ === 'tag') return node.tagName === value;
+
+                    if (type_ === 'class') return value.every(item => node.classList?.contains(item));
+                    return false;
+                }
+                
+                return Object.keys(expression).every(key => {
+                    return checkOne(key, expression[key]);
+                });
+
+            }
             return this.waitElement(decNode, (node) => {
-                this.log('waitForRender', node);
-                if (type === 'selector') return node.querySelector(expression);
-                if (type === 'class') return node.classList?.contains(expression);
-                if (type === 'id') return node.id === expression;
-                if (type === 'name') return node.name === expression;
-                if (type === 'tag') return node.tagName === expression;
-                return false;
+                // this.info('waitForRender', node);
+                return conditionCheck(node);
             }, { timeout });
         };
     }
