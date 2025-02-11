@@ -1,12 +1,12 @@
 /**
  * QuicklyModelCore 类
- * 版本: 1.0.4
+ * 版本: 1.0.5
  * 作者: hua
  */
 
 class QuicklyModelCore {
     constructor(options = {}) {
-        this.version = '1.0.4';
+        this.version = '1.0.5';
         this.initConfig(options);
         this.initModules();
         this.utils.apiLog.info('Api已加载 版本号:', this.version);
@@ -1112,7 +1112,8 @@ class DOMModule extends BaseModule {
                     const contentWindow = contentWindow_getter.call(node);
                     delete node.contentWindow;
                     if (!contentWindow || this.src !== 'about:blank') return contentWindow;
-                    localContext.iframe.contentWindow.trigger(this, contentWindow, node);
+                    const res = localContext.iframe.contentWindow.trigger(this, contentWindow, node);
+                    if (res === false) return;
                     return contentWindow;
                 },
                 configurable: true
@@ -1341,7 +1342,9 @@ class EventModule extends BaseModule {
         this.addEventListener = this.factory('addEventListener', { modify: [0, 1] }, { stopPropagation: true, modify: [0, 1] });
         const origin_addEventListener = unsafeWindow.addEventListener;
         const fakeAddEventListener = function (tag, fun, options) {
-            [tag, fun, options] = localContext.addEventListener.trigger(this, tag, fun, options);
+            const res = localContext.addEventListener.trigger(this, tag, fun, options);
+            if (res === false) return;
+            [tag, fun, options] = res;
             return origin_addEventListener.call(this, tag, fun, options);
         };
         this.utils.origin.hook('addEventListener', fakeAddEventListener);
@@ -1356,7 +1359,9 @@ class EventModule extends BaseModule {
 
         const origin_postMessage = unsafeWindow.postMessage;
         const fakePostMessage = function (message, targetOrigin, transfer) {
-            [message, targetOrigin] = localContext.message.postMessage.trigger(this, message, targetOrigin);
+            const res = localContext.message.postMessage.trigger(this, message, targetOrigin);
+            if (res === false) return
+            [message, targetOrigin] = res;
             const args = [message];
             if (targetOrigin) args.push(targetOrigin);
             if (transfer) args.push(transfer);
@@ -1388,7 +1393,7 @@ class EventModule extends BaseModule {
         const fakeOpen = function (url, target, features, replace) {
             if (!url) url = "about:blank";
             url = localContext.winOpen.trigger(this, url, target, features, replace);
-            if (!url) return;
+            if (url === false) return;
             return origin_open.call(this, url, target, features, replace);
         };
         this.utils.origin.hook('open', fakeOpen);
@@ -1400,7 +1405,7 @@ class EventModule extends BaseModule {
         const origin_eval = unsafeWindow.eval;
         const fakeEval = function (code) {
             code = localContext.eval.trigger(this, code);
-            if (!code) return;
+            if (code === false) return;
             return origin_eval.call(this, code);
         };
         this.utils.origin.hook('eval', fakeEval);
@@ -1540,7 +1545,9 @@ class DateModule extends BaseModule {
         this.setTimeout = this.factory('setTimeout', { modify: [0, 1] }, { stopPropagation: true, modify: [0, 1] });
         const origin_setTimeout = unsafeWindow.setTimeout;
         const fakeSetTimeout = function (fun, delay, ...args) {
-            [fun, delay] = localContext.setTimeout.trigger(this, fun, delay, ...args);
+            const res = localContext.setTimeout.trigger(this, fun, delay, ...args);
+            if (res === false) return;
+            [fun, delay] = res;
             return origin_setTimeout.call(this, fun, delay, ...args);
         };
         this.utils.origin.hook('setTimeout', fakeSetTimeout);
@@ -1551,7 +1558,9 @@ class DateModule extends BaseModule {
         this.setInterval = this.factory('setInterval', { modify: [0, 1] }, { stopPropagation: true, modify: [0, 1] });
         const origin_setInterval = unsafeWindow.setInterval;
         const fakeSetInterval = function (fun, delay, ...args) {
-            [fun, delay] = localContext.setInterval.trigger(this, fun, delay, ...args);
+            const res = localContext.setInterval.trigger(this, fun, delay, ...args);
+            if (res === false) return;
+            [fun, delay] = res;
             return origin_setInterval.call(this, fun, delay, ...args);
         };
         this.utils.origin.hook('setInterval', fakeSetInterval);
@@ -1642,10 +1651,12 @@ class NetworkModule extends BaseModule {
                         try {
                             const options = { body: uri.body_, params: localContext.utils.url.paramsParse(url) };
                             text = localContext.fetch.response.text.trigger(this, text, url, options);
+                            if (text === false) return;
                             if (text instanceof Promise) text = await text;
                             if (localContext.fetch.response.commonTextToJsonProcess.matchCallbackNum(this, null, url, options)) {
                                 let json = JSON.parse(text);
-                                localContext.fetch.response.commonTextToJsonProcess.trigger(this, json, url, options);
+                                const res = localContext.fetch.response.commonTextToJsonProcess.trigger(this, json, url, options);
+                                if (res === false) return;
                                 text = JSON.stringify(json);
                             }
                         } catch (error) {
@@ -1659,7 +1670,8 @@ class NetworkModule extends BaseModule {
                     response.json = async function () {
                         let json = await originJson();
                         try {
-                            localContext.fetch.response.json.trigger(this, json, url, options);
+                            const res = localContext.fetch.response.json.trigger(this, json, url, options);
+                            if (res === false) return;
                         } catch (error) {
                             localContext.error('fetch response json error', error);
                             json = await cloneResponse.json();
@@ -1667,6 +1679,7 @@ class NetworkModule extends BaseModule {
                         return json;
                     };
                     response = localContext.fetch.response.trigger(this, response, url, options);
+                    if (response === false) return;
                     return response;
                 }
                 let req;
@@ -1704,6 +1717,7 @@ class NetworkModule extends BaseModule {
                 if (typeof input === 'string') {
                     try {
                         input = localContext.fetch.request.trigger(null, input, options, 'request');
+                        if (input === false) return;
                     } catch (error) {
                         localContext.error('Request error', error);
                     }
@@ -1726,6 +1740,7 @@ class NetworkModule extends BaseModule {
                     delete options.signal;
                 }
                 input = localContext.fetch.request.trigger(null, input, options, 'request');
+                if (input === false) return;
                 return new target(input, options);
             }
         });
@@ -1747,15 +1762,15 @@ class NetworkModule extends BaseModule {
         class fakeXMLHttpRequest extends unsafeWindow.XMLHttpRequest {
             open(method, url, ...opts) {
                 url = localContext.xhr.request.open.trigger(this, url, opts);
-                if (url === '') url = 'http://192.168.0.1:8080/';
+                if (url === false) url = 'http://192.168.0.1:8080/';
                 this.url_ = url;
                 return super.open(method, url, ...opts);
             }
 
             send(body) {
                 let url;
-                [body, url] = localContext.xhr.request.send.trigger(this, body, this.url_);
-                if (url === '') {
+                const res = localContext.xhr.request.send.trigger(this, body, this.url_);
+                if (res === false) {
                     const hook_get = (name, value) => {
                         localContext.utils.defineProperty(this, name, {
                             get: function () {
@@ -1773,6 +1788,7 @@ class NetworkModule extends BaseModule {
                     }
                     return;
                 }
+                [body, url] = res;
                 this.body_ = body;
                 super.send(body);
             }
@@ -1790,13 +1806,15 @@ class NetworkModule extends BaseModule {
                             if (localContext.xhr.response.json.matchCallbackNum(this, null, url, options)) {
                                 try {
                                     const json = JSON.parse(result);
-                                    localContext.xhr.response.json.trigger(this, json, url, options);
+                                    const res = localContext.xhr.response.json.trigger(this, json, url, options);
+                                    if (res === false) return;
                                     result = JSON.stringify(json);
                                 } catch (error) {
                                     localContext.error(error);
                                 }
                             } else {
                                 result = localContext.xhr.response.text.trigger(this, result, url, options);
+                                if (result === false) return;
                             }
                         } catch (error) {
                             localContext.error(error);
@@ -1831,6 +1849,7 @@ class NetworkModule extends BaseModule {
         const fakeWebSocket = class extends unsafeWindow.WebSocket {
             constructor(url, ...opts) {
                 url = localContext.webSocket.open.trigger(null, url, opts);
+                if (url === false) return;
                 super(url, ...opts);
 
                 this.addEventListener('message', (event) => {
@@ -1854,7 +1873,7 @@ class NetworkModule extends BaseModule {
                 const originSend = this.send;
                 this.send = function (data) {
                     data = localContext.webSocket.send.trigger(this, data, url);
-                    if (data === null) return;
+                    if (data === false) return;
                     return originSend.call(this, data);
                 };
             }
@@ -1984,11 +2003,15 @@ class NetworkModule extends BaseModule {
             constructor(scriptURL, options = {}) {
                 // 处理脚本URL
                 scriptURL = localContext.worker.create.trigger(null, scriptURL, options);
+                if (scriptURL === false) return;
                 super(scriptURL, options);
 
                 // 处理消息
                 this.addEventListener('message', function (event) {
-                    localContext.worker.onMessage.trigger(this, event);
+                    const res = localContext.worker.onMessage.trigger(this, event);
+                    if (res !== false) return;
+                    event.stopPropagation();
+                    event.stopImmediatePropagation();
                 }, {
                     capture: true,
                     priority: true,
@@ -2006,7 +2029,7 @@ class NetworkModule extends BaseModule {
                 const originPostMessage = this.postMessage;
                 this.postMessage = function (message, transfer) {
                     message = localContext.worker.postMessage.trigger(this, message, transfer);
-                    if (!message) return;
+                    if (message === false) return;
                     return originPostMessage.call(this, message, transfer);
                 };
             }
@@ -2179,7 +2202,8 @@ class DataModule extends BaseModule {
 
         const fakeParse = (text) => {
             const res = this.json.parase.trigger(null, text);
-            if (res) text = res;
+            if (res === false) return;
+            text = res;
             return originParse(text);
         };
 
@@ -2204,7 +2228,7 @@ class DataModule extends BaseModule {
 
         const fakeSetItem = function (key, value) {
             value = localContext.localStorage.setItem.trigger(this, value, key);
-            if (!value) return;
+            if (value === false) return;
             return originSetItem.call(this, key, value);
         };
         this.utils.origin.hook('localStorage.setItem', fakeSetItem);
@@ -2212,6 +2236,7 @@ class DataModule extends BaseModule {
         const fakeGetItem = function (key) {
             let value = originGetItem.call(this, key);
             value = localContext.localStorage.getItem.trigger(this, value, key);
+            if (value === false) return;
             return value;
         };
         this.utils.origin.hook('localStorage.getItem', fakeGetItem);
@@ -2230,7 +2255,7 @@ class DataModule extends BaseModule {
 
         const fakeSetItem = function (key, value) {
             value = localContext.sessionStorage.setItem.trigger(this, value, key);
-            if (!value) return;
+            if (value === false) return;
             return originSetItem.call(this, key, value);
         };
         this.utils.origin.hook('sessionStorage.setItem', fakeSetItem);
@@ -2238,6 +2263,7 @@ class DataModule extends BaseModule {
         const fakeGetItem = function (key) {
             let value = originGetItem.call(this, key);
             value = localContext.sessionStorage.getItem.trigger(this, value, key);
+            if (value === false) return;
             return value;
         };
         this.utils.origin.hook('sessionStorage.getItem', fakeGetItem);
@@ -3107,7 +3133,9 @@ class OtherModule extends BaseModule {
         this.promise = this.factory('Promise', { modify: [0, 1] }, { stopPropagation: true, modify: [0, 1] });
         const fakePromise = class extends unsafeWindow.Promise {
             then(onFulfilled, onRejected) {
-                [onFulfilled, onRejected] = localContext.promise.trigger(this, onFulfilled, onRejected);
+                const res = localContext.promise.trigger(this, onFulfilled, onRejected);
+                if (res === false) return;
+                [onFulfilled, onRejected] = res;
                 return super.then(onFulfilled, onRejected);
             }
         };
@@ -3117,9 +3145,11 @@ class OtherModule extends BaseModule {
     initCanvas() {
         const localContext = this;
         let origin_toDataURL = unsafeWindow.HTMLCanvasElement.prototype.toDataURL;
+        this.canvas = this.factory('canvas', { modify: 0 }, { stopPropagation: true, modify: 0 })
         const fakeToDataURL = function (type, encoderOptions) {
             const value = origin_toDataURL.apply(this, arguments);
             const result = localContext.canvas.trigger(this, type, encoderOptions);
+            if (result === false) return;
             return result || value;
         };
         this.utils.origin.hook('HTMLCanvasElement.prototype.toDataURL', fakeToDataURL);
@@ -3131,6 +3161,7 @@ class OtherModule extends BaseModule {
         const originRandom = Math.random;
         const fakeRandom = function () {
             const result = localContext.random.trigger(this);
+            if (result === false) return;
             return result || originRandom.apply(this);
         };
         this.utils.origin.hook('Math.random', fakeRandom);
@@ -3176,7 +3207,8 @@ class OtherModule extends BaseModule {
                         }
                     }
                 };
-                localContext.webpack.trigger(utils, ...chunk);
+                const res = localContext.webpack.trigger(utils, ...chunk);
+                if (res === false) return;
                 originPush.call(this, chunk);
             };
         };
@@ -3213,14 +3245,17 @@ class VideoModule extends BaseModule {
         this.hls.manifestParsed = this.factory('manifestParsed', {}, {});
         let Hls_ = null;
         const hookHlsInstance = function (instance) {
-            localContext.hls.oncreate.trigger(this, instance);
+            const res = localContext.hls.oncreate.trigger(this, instance);
+            if (res === false) return;
             const originLoadSource = instance.loadSource;
             instance.loadSource = function (url) {
                 url = localContext.hls.loadSource.trigger(this, url);
+                if (url === false) return;
                 return originLoadSource.call(this, url);
             };
             instance.on(Hls_.Events.MANIFEST_PARSED, function (event, data) {
-                localContext.hls.manifestParsed.trigger(this, event, data);
+                const res = localContext.hls.manifestParsed.trigger(this, event, data);
+                if (res === false) return;
             });
 
         };
