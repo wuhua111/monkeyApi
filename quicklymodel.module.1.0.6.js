@@ -1,12 +1,12 @@
 /**
  * QuicklyModelCore 类
- * 版本: 1.0.5
+ * 版本: 1.0.6
  * 作者: hua
  */
 
 class QuicklyModelCore {
     constructor(options = {}) {
-        this.version = '1.0.5';
+        this.version = '1.0.6';
         this.initConfig(options);
         this.initModules();
         this.utils.apiLog.info('Api已加载 版本号:', this.version);
@@ -82,6 +82,7 @@ class QuicklyModelCore {
         this.date = new DateModule(this);
         this.other = new OtherModule(this);
         this.video = new VideoModule(this);
+        this.anti = new AntiMoudle(this);
 
         // 开发模式下添加调试工具
         if (this.config.dev) {
@@ -923,7 +924,7 @@ class UtilsModule extends BaseModule {
                 configurable: configurable
             };
             const originDescriptor = Object.getOwnPropertyDescriptor(obj, propertyName);
-             try {
+            try {
                 Object.defineProperty(obj, propertyName, fakeDescriptor);
             } catch (error) {
                 this.error('keepPropertyValue error', error);
@@ -3321,6 +3322,172 @@ class VideoModule extends BaseModule {
                 Hls_ = value;
             }
         });
+    }
+}
+
+class AntiMoudle extends BaseModule {
+    constructor(core) {
+        super(core);
+
+        if (this.isEnabled('AntiDebugger')) {
+            this.initAntiDebugger();
+            this.info('AntiMoudle AntiDebugger 初始化成功');
+        }
+    }
+    safeFake(originFun, fakeFun) {
+        if (typeof originFun !== 'function' || typeof fakeFun !== 'function') {
+            return this.error('safeFake参数必须是函数');
+        }
+
+        try {
+            // 复制原始函数的所有属性
+            const propertyNames = Object.getOwnPropertyNames(originFun);
+            propertyNames.forEach(key => {
+                if (key !== 'prototype') {
+                    try {
+                        const descriptor = Object.getOwnPropertyDescriptor(originFun, key);
+                        Object.defineProperty(fakeFun, key, descriptor);
+                    } catch (e) {
+                        this.error('safeFake复制属性失败:', key, e);
+                    }
+                }
+            });
+
+            // 保持prototype链
+            if (originFun.prototype) {
+                fakeFun.prototype = originFun.prototype;
+            }
+
+            // 保持函数名称
+            Object.defineProperty(fakeFun, "name", {
+                value: originFun.name,
+                configurable: true
+            });
+
+            // 保持函数长度
+            Object.defineProperty(fakeFun, "length", {
+                value: originFun.length,
+                configurable: true
+            });
+
+            // 伪装toString方法
+            const originToString = originFun.toString();
+            fakeFun.toString = function () {
+                return originToString;
+            };
+
+            // 伪装Symbol.toStringTag
+            if (originFun[Symbol.toStringTag]) {
+                Object.defineProperty(fakeFun, Symbol.toStringTag, {
+                    value: originFun[Symbol.toStringTag],
+                    configurable: true
+                });
+            }
+
+            // 伪装Symbol.hasInstance
+            if (originFun[Symbol.hasInstance]) {
+                Object.defineProperty(fakeFun, Symbol.hasInstance, {
+                    value: originFun[Symbol.hasInstance].bind(originFun),
+                    configurable: true
+                });
+            }
+
+            // 复制所有Symbol属性
+            const symbols = Object.getOwnPropertySymbols(originFun);
+            symbols.forEach(sym => {
+                try {
+                    const descriptor = Object.getOwnPropertyDescriptor(originFun, sym);
+                    Object.defineProperty(fakeFun, sym, descriptor);
+                } catch (e) {
+                    this.error('safeFake复制Symbol属性失败:', sym, e);
+                }
+            });
+
+            // 设置构造函数
+            if (originFun.prototype && originFun.prototype.constructor) {
+                fakeFun.prototype.constructor = fakeFun;
+            }
+
+            return fakeFun;
+        } catch (e) {
+            this.error('safeFake执行失败:', e);
+            return originFun;  // 如果失败则返回原始函数
+        }
+    }
+
+    initAntiDebugger() {
+        const localContext = this;
+        this.debugger = {};
+
+        const fakeConsoleTable = () => {
+            const fakeFun = function () { };
+            console.table = this.safeFake(console.table, fakeFun);
+        };
+        fakeConsoleTable();
+
+        const fakeApply = () => {
+            Function.prototype.apply_ = Function.prototype.apply;
+            const fake = function () {
+                if (this !== Function.prototype.apply && this?.toString().includes("debugger")) {
+                    localContext.info('safeFake apply 拦截到debugger');
+                    return;
+                }
+                return this.apply_(...arguments);
+            };
+            Function.prototype.apply = this.safeFake(Function.prototype.apply, fake);
+        };
+        fakeApply();
+
+        const fakeCall = () => {
+            Function.prototype.call_ = Function.prototype.call;
+            const fake = function () {
+                // if (this?.toString().includes("debugger")) {
+                //     debugger;
+                //     localContext.info('safeFake call 拦截到debugger');
+                //     return;
+                // }
+                return this.call_(...arguments);
+            };
+            Function.prototype.call = this.safeFake(Function.prototype.call, fake);
+        };
+        fakeCall();
+
+        const fakeConstructor = () => {
+            // 保存原始的constructor
+            const originConstructor = Function.prototype.constructor;
+            Function.prototype.constructor_ = originConstructor;
+
+            const fake = function () {
+                try {
+                    // 检查是否包含debugger
+                    if (arguments[0]?.toString().includes("debugger")) {
+                        localContext.info('safeFake constructor 拦截到debugger');
+                        return function () { };
+                    }
+
+                    // 检查调用者是否包含debugger
+                    if (this?.toString().includes("debugger")) {
+                        localContext.info('safeFake constructor 拦截到debugger');
+                        return function () { };
+                    }
+
+                    // 如果是直接调用constructor
+                    if (this === Function.prototype) {
+                        localContext.info('safeFake constructor 直接调用constructor');
+                        return originConstructor.apply(this, arguments);
+                    }
+
+                    // 其他正常调用
+                    return this.constructor_(...arguments);
+                } catch (e) {
+                    // 出错时返回空函数
+                    localContext.error('safeFake执行失败:', e);
+                    return function () { };
+                }
+            };
+            Function.prototype.constructor = this.safeFake(Function.prototype.constructor, fake);
+        };
+        fakeConstructor();
     }
 }
 
