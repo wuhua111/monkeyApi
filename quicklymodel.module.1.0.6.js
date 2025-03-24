@@ -41,6 +41,7 @@ class QuicklyModelCore {
         // setAttribute: 拦截setAttribute 返回false 拦截
         // webpack: webpack拦截 需要config里通过webpack属性传入一个webpack具体名称 
         // hls: hls拦截
+        // AntiWindowClose: 拦截window.close
         const defaultEnable = new Set(['createElement', 'iframe', 'fetch', 'xhr', 'request']);
 
         // 禁用默认
@@ -83,6 +84,7 @@ class QuicklyModelCore {
         this.other = new OtherModule(this);
         this.video = new VideoModule(this);
         this.anti = new AntiMoudle(this);
+        this.worker = new WorkerModule(this);
 
         // 开发模式下添加调试工具
         if (this.config.dev) {
@@ -135,14 +137,24 @@ class UtilsModule extends BaseModule {
         this.initType();
         this.initOrigin();
         this.initDebugHelper();
-
+        this.initObj();
         this.initCookie();
         this.initUrl();
 
 
         // 其他工具属性
         this.ua = unsafeWindow.navigator.userAgent;
-        this.console = unsafeWindow.console;
+        this.console = {
+            log: unsafeWindow.console.log,
+            info: unsafeWindow.console.info,
+            warn: unsafeWindow.console.warn,
+            error: unsafeWindow.console.error,
+            debug: unsafeWindow.console.debug,
+            table: unsafeWindow.console.table,
+            clear: unsafeWindow.console.clear,
+            trace: unsafeWindow.console.trace,
+        };
+        unsafeWindow.console.clear = () => { };
     }
 
     initFactory() {
@@ -885,66 +897,69 @@ class UtilsModule extends BaseModule {
     }
 
     // 工具方法
-    obj = {
-        defineProperty(obj, property, descriptor) {
-            const old_descriptor = Object.getOwnPropertyDescriptor(obj, property);
-            if (old_descriptor?.configurable === false) {
-                if (old_descriptor.writable === false) {
-                    this.error(property, 'is not configurable and not writable !', old_descriptor);
-                    return;
-                } else {
-                    if (descriptor.value) {
-                        obj[property] = descriptor.value;
-                        if (descriptor.configurable === false) {
-                            this.warn(property, 'is not configurable ! but can set value !', old_descriptor);
+    initObj() {
+        const localContext = this;
+        this.obj = {
+            defineProperty(obj, property, descriptor) {
+                const old_descriptor = Object.getOwnPropertyDescriptor(obj, property);
+                if (old_descriptor?.configurable === false) {
+                    if (old_descriptor.writable === false) {
+                        localContext.error(property, 'is not configurable and not writable !', old_descriptor);
+                        return;
+                    } else {
+                        if (descriptor.value) {
+                            obj[property] = descriptor.value;
+                            if (descriptor.configurable === false) {
+                                localContext.warn(property, 'is not configurable ! but can set value !', old_descriptor);
+                            }
+                            return;
                         }
+                        localContext.error(property, 'is not configurable , but can set value ! ', old_descriptor);
+                    }
+                }
+                Object.defineProperty(obj, property, descriptor);
+            },
+            hookGlobalPrototypeName(propertyName, descriptor) {
+                this.defineProperty(Object.prototype, propertyName, descriptor);
+            },
+            keepPropertyValue(obj, propertyName, value, configurable = true) {
+                if (!obj || typeof propertyName !== 'string') {
+                    localContext.error('keepPropertyValue error', 'Invalid parameters');
+                    return;
+                }
+                let currentValue = obj[propertyName];
+                const fakeDescriptor = {
+                    get() {
+                        return value;
+                    },
+                    set(newValue) {
+                        currentValue = newValue;
+                    },
+                    configurable: configurable
+                };
+                const originDescriptor = Object.getOwnPropertyDescriptor(obj, propertyName);
+                try {
+                    Object.defineProperty(obj, propertyName, fakeDescriptor);
+                } catch (error) {
+                    localContext.error('keepPropertyValue error', error);
+                    return;
+                }
+                return () => {
+                    if (!configurable) return localContext.error('keepPropertyValue error', 'configurable is false');
+                    try {
+                        if (originDescriptor) {
+                            Object.defineProperty(obj, propertyName, originDescriptor);
+                        } else {
+                            delete obj[propertyName];
+                        }
+                    } catch (error) {
+                        localContext.error('keepPropertyValue error', error);
                         return;
                     }
-                    this.error(property, 'is not configurable , but can set value ! ', old_descriptor);
-                }
+                    obj[propertyName] = currentValue;
+                };
             }
-            Object.defineProperty(obj, property, descriptor);
-        },
-        hookGlobalPrototypeName(propertyName, descriptor) {
-            this.defineProperty(Object.prototype, propertyName, descriptor);
-        },
-        keepPropertyValue(obj, propertyName, value, configurable = true) {
-            if (!obj || typeof propertyName !== 'string') {
-                this.error('keepPropertyValue error', 'Invalid parameters');
-                return;
-            }
-            let currentValue = obj[propertyName];
-            const fakeDescriptor = {
-                get() {
-                    return value;
-                },
-                set(newValue) {
-                    currentValue = newValue;
-                },
-                configurable: configurable
-            };
-            const originDescriptor = Object.getOwnPropertyDescriptor(obj, propertyName);
-            try {
-                Object.defineProperty(obj, propertyName, fakeDescriptor);
-            } catch (error) {
-                this.error('keepPropertyValue error', error);
-                return;
-            }
-            return () => {
-                if (!configurable) return this.error('keepPropertyValue error', 'configurable is false');
-                try {
-                    if (originDescriptor) {
-                        Object.defineProperty(obj, propertyName, originDescriptor);
-                    } else {
-                        delete obj[propertyName];
-                    }
-                } catch (error) {
-                    this.error('keepPropertyValue error', error);
-                    return;
-                }
-                obj[propertyName] = currentValue;
-            };
-        }
+        };
     };
 
 
@@ -1263,10 +1278,53 @@ class DOMModule extends BaseModule {
                 return Object.keys(expression).every(key => {
                     return checkOne(key, expression[key]);
                 });
-
             };
+
+            const convertToSelector = () => {
+                // 如果已经是selector类型，直接返回
+                if ('selector' in expression) {
+                    return expression.selector;
+                }
+
+                let selectorParts = [];
+
+                // 处理tag
+                if ('tag' in expression) {
+                    selectorParts.push(expression.tag.toLowerCase());
+                }
+
+                // 处理id
+                if ('id' in expression) {
+                    selectorParts.push(`#${expression.id}`);
+                }
+
+                // 处理name
+                if ('name' in expression) {
+                    selectorParts.push(`[name="${expression.name}"]`);
+                }
+
+                // 处理class
+                if ('class' in expression) {
+                    if (Array.isArray(expression.class)) {
+                        selectorParts.push(expression.class.map(c => `.${c}`).join(''));
+                    } else {
+                        selectorParts.push(`.${expression.class}`);
+                    }
+                }
+
+                // 组合选择器
+                const selector = selectorParts.join('');
+
+                // 如果没有任何有效部分，返回null
+                if (!selector) {
+                    return null;
+                }
+                return selector;
+            };
+
+            const result = this.query.$(convertToSelector());
+            if (result) return Promise.resolve(result);
             return this.waitElement(decNode, (node) => {
-                // this.info('waitForRender', node);
                 return conditionCheck(node);
             }, { timeout });
         };
@@ -1636,11 +1694,6 @@ class NetworkModule extends BaseModule {
         if (this.isEnabled('webSocket')) {
             this.initWebSocket();
             this.info('NetworkModule webSocket 初始化成功');
-        }
-
-        if (this.isEnabled('worker')) {
-            this.initWorker();
-            this.info('NetworkModule worker 初始化成功');
         }
 
         if (this.isEnabled('dyncFileLoad')) {
@@ -2032,25 +2085,31 @@ class NetworkModule extends BaseModule {
             }
         }, { condition: (_, tag) => dyncLoadFlags.includes(tag) });
     }
+}
+
+class WorkerModule extends BaseModule {
+    constructor(core) {
+        super(core);
+        if (this.isEnabled('worker')) {
+            this.initWorker();
+            this.info('NetworkModule worker 初始化成功');
+        }
+    }
 
     initWorker() {
         const localContext = this;
-        this.worker = {
-            create: this.factory('workerCreate', { modify: [0] }, { stopPropagation: true, modify: [0] }),
-            onMessage: this.factory('workerOnMessage', {}, { stopPropagation: true }),
-            postMessage: this.factory('workerPostMessage', { modify: [0] }, { stopPropagation: true, modify: [0] }),
-        };
+        this.create = this.factory('workerCreate', { modify: [0] }, { stopPropagation: true, modify: [0] });
+        this.onMessage = this.factory('workerOnMessage', {}, { stopPropagation: true });
+        this.postMessage = this.factory('workerPostMessage', { modify: [0] }, { stopPropagation: true, modify: [0] });
 
         const fakeWorker = class extends unsafeWindow.Worker {
             constructor(scriptURL, options = {}) {
-                // 处理脚本URL
-                scriptURL = localContext.worker.create.trigger(null, scriptURL, options);
+                scriptURL = localContext.create.trigger(null, scriptURL, options);
                 if (scriptURL === false) return;
                 super(scriptURL, options);
 
-                // 处理消息
                 this.addEventListener('message', function (event) {
-                    const res = localContext.worker.onMessage.trigger(this, event);
+                    const res = localContext.onMessage.trigger(this, event);
                     if (res !== false) return;
                     event.stopPropagation();
                     event.stopImmediatePropagation();
@@ -2058,29 +2117,19 @@ class NetworkModule extends BaseModule {
                     capture: true,
                     priority: true,
                 });
-                const origin_addEventListener = this.addEventListener;
-                this.addEventListener = function (type, listener, options) {
-                    if (type === 'message' && options) {
-                        options.capture = false;
-                        options.priority = false;
-                    }
-                    origin_addEventListener.call(this, type, listener, options);
-                };
 
                 // 原始postMessage方法
                 const originPostMessage = this.postMessage;
                 this.postMessage = function (message, transfer) {
-                    message = localContext.worker.postMessage.trigger(this, message, transfer);
+                    message = localContext.postMessage.trigger(this, message, transfer);
                     if (message === false) return;
                     return originPostMessage.call(this, message, transfer);
                 };
-            }
+            };
         };
-
         this.utils.origin.hook('Worker', fakeWorker);
     }
 }
-
 /**
  * 动画模块
  * 处理动画效果
@@ -3225,11 +3274,9 @@ class OtherModule extends BaseModule {
         this.webpack = this.factory('webpack', {}, {});
         let webpack = null;
         const localContext = this;
-        let modifiedWebpackPush = false;
         const hookPush = () => {
-            if (modifiedWebpackPush) return;
             const originPush = webpack.push;
-            modifiedWebpackPush = true;
+            webpack.inject = true;
             webpack.push = function (chunk) {
                 const utils = {
                     modifyFun: function (funName, reg, replace) {
@@ -3260,7 +3307,8 @@ class OtherModule extends BaseModule {
             },
             set: function (value) {
                 webpack = value;
-                if (typeof webpack === 'object' && Object.getOwnPropertyNames(webpack).includes('push')) hookPush();
+                // Object.getOwnPropertyNames(webpack).includes('push')
+                if (typeof webpack === 'object' && Array.isArray(webpack) && !webpack.inject) hookPush();
             }
 
         });
@@ -3332,6 +3380,11 @@ class AntiMoudle extends BaseModule {
         if (this.isEnabled('AntiDebugger')) {
             this.initAntiDebugger();
             this.info('AntiMoudle AntiDebugger 初始化成功');
+        }
+
+        if (this.isEnabled('AntiWindowClose')) {
+            this.initAntiWindowClose();
+            this.info('AntiMoudle AntiWindowClose 初始化成功');
         }
     }
     safeFake(originFun, fakeFun) {
@@ -3488,6 +3541,16 @@ class AntiMoudle extends BaseModule {
             Function.prototype.constructor = this.safeFake(Function.prototype.constructor, fake);
         };
         fakeConstructor();
+    }
+
+    initAntiWindowClose() {
+        const localContext = this;
+        unsafeWindow.close_ = unsafeWindow.close;
+        const fake = function () {
+            localContext.info('window.close 拦截到window强制关闭');
+            return;
+        };
+        unsafeWindow.close = this.safeFake(unsafeWindow.close, fake);
     }
 }
 
